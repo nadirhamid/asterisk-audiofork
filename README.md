@@ -18,10 +18,15 @@ rm -rf ./menuselect.makeopts
 ```
 make menuselect
 ```
+* app_audiofork should be listed under "Applications" and selected by default.
 5. install asterisk
 ```
 make
 make install
+```
+6. restart asterisk
+```
+asterisk -rx 'core restart now'
 ```
 
 # configuring in dial plans
