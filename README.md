@@ -1,7 +1,14 @@
 ## what is app_audiofork
 
-This is an asterisk module based on asterisk mix monitor that allows you to send the raw PCM or "audio/pcm" packets to a set websocket server. 
-The module also lets you customize options an audio fork can use like applying volume gains or configuring beeps at set intervals.
+app_audiofork lets you integrate raw audio streams in your third party app by making minor adjustments to your asterisk dialplan. 
+
+the asterisk app works as a small "fork" between your dialplan and app logic. 
+
+```
+ASTERISK -> AUDIO STREAM -> WS APP SERVER
+```
+
+the code is completely designed to work around the asterisk core using no third party deps and it is completely developed using built in audio hooks and works well with websockets via built in asterisk res_http_websocket.c.
 
 # how to install
 
@@ -86,7 +93,6 @@ sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 
 below is a list of updates planned for the module:
 
-```
 - add asterisk manager support
   - stopping live AudioForks thru AMI
   - starting new AudioFork based on channel prefix
@@ -94,7 +100,6 @@ below is a list of updates planned for the module:
   - muting AudioFork
 - store responses pushed from websocket server into channel var
 - add support for SSL connections (maybe)
-```
 
 # contact info
 
