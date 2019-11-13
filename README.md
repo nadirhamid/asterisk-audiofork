@@ -8,7 +8,7 @@ the asterisk app works as a small "fork" between your dialplan and app logic.
 ASTERISK -> AUDIO STREAM -> WS APP SERVER
 ```
 
-the code is completely designed to work around the asterisk core using no third party deps and it is completely developed using built in audio hooks and works well with websockets via built in asterisk res_http_websocket.c.
+the main purpose of this app is to give third party apps a shot at processing audio streams as they are live on an asterisk channel. as well as being able to quickly offload audio processing to another server or script.
 
 # how to install
 
