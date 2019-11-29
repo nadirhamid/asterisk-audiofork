@@ -19,7 +19,7 @@ please use the following steps to install the module:
 2. cd into your asterisk source tree
 3. refresh the menuselect options
 ```
-rm -rf ./menuselect.makeopts
+rm -f ./menuselect.makeopts
 ```
 4. re run menuselect
 ```
@@ -31,9 +31,9 @@ make menuselect
 make
 make install
 ```
-6. restart asterisk
+6. reload asterisk
 ```
-asterisk -rx 'core restart now'
+asterisk -rx 'core reload'
 ```
 
 # configuring in dial plans
