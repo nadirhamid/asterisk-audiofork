@@ -293,6 +293,7 @@ struct audiofork {
 	struct ast_audiohook audiohook;
   struct ast_websocket * websocket;
 	char *wsserver;
+  enum ast_audiohook_direction direction;
 	char *post_process;
 	char *name;
 	ast_callid callid;
@@ -323,6 +324,7 @@ enum audiofork_flags {
 	MUXFLAG_BEEP_START = (1 << 12),
 	MUXFLAG_BEEP_STOP = (1 << 13),
 	MUXFLAG_RWSYNC = (1 << 14),
+	MUXFLAG_DIRECTION = (1 << 15)
 };
 
 enum audiofork_args {
@@ -332,6 +334,7 @@ enum audiofork_args {
 	OPT_ARG_UID,
 	OPT_ARG_BEEP_INTERVAL,
 	OPT_ARG_RWSYNC,
+	OPT_ARG_DIRECTION,
 	OPT_ARG_ARRAY_SIZE,	/* Always last element of the enum */
 };
 
@@ -346,6 +349,7 @@ AST_APP_OPTIONS(audiofork_opts, {
 	AST_APP_OPTION_ARG('W', MUXFLAG_VOLUME, OPT_ARG_VOLUME),
 	AST_APP_OPTION_ARG('i', MUXFLAG_UID, OPT_ARG_UID),
 	AST_APP_OPTION_ARG('S', MUXFLAG_RWSYNC, OPT_ARG_RWSYNC),
+	AST_APP_OPTION_ARG('D', MUXFLAG_DIRECTION, OPT_ARG_DIRECTION),
 });
 
 struct audiofork_ds {
@@ -461,11 +465,8 @@ static void *audiofork_thread(void *obj)
 	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
 		ast_verb(2, "reading audio hook frame...\n");
 		struct ast_frame *fr = NULL;
-		struct ast_frame *fr_read = NULL;
-		struct ast_frame *fr_write = NULL;
 
-		if (!(fr = ast_audiohook_read_frame_all(&audiofork->audiohook, SAMPLES_PER_FRAME, format_slin,
-						&fr_read, &fr_write))) {
+		if (!(fr = ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME, audiofork->direction, format_slin))) {
 			ast_audiohook_trigger_wait(&audiofork->audiohook);
 
 			if (audiofork->audiohook.status != AST_AUDIOHOOK_STATUS_RUNNING) {
@@ -479,7 +480,7 @@ static void *audiofork_thread(void *obj)
 		ast_audiohook_unlock(&audiofork->audiohook);
 	  struct ast_frame *cur;
 		//ast_mutex_lock(&audiofork->audiofork_ds->lock);
-    for (cur = fr_write; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
+    for (cur = fr; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
 		  ast_verb(2, "sending audio frame to websocket...\n");
 			//ast_mutex_lock(&audiofork->audiofork_ds->lock);
       if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
@@ -492,16 +493,8 @@ static void *audiofork_thread(void *obj)
 		if (fr) {
 			ast_frame_free(fr, 0);
 		}
-		if (fr_read) {
-			ast_frame_free(fr_read, 0);
-		}
-		if (fr_write) {
-			ast_frame_free(fr_write, 0);
-		}
 
 		fr = NULL;
-		fr_write = NULL;
-		fr_read = NULL;
 
 		ast_audiohook_lock(&audiofork->audiohook);
 	}
@@ -588,7 +581,7 @@ static int setup_audiofork_ds(struct audiofork *audiofork, struct ast_channel *c
 }
 
 static int launch_audiofork_thread(struct ast_channel *chan, const char *wsserver,
-				  unsigned int flags, int readvol, int writevol,
+				  unsigned int flags, enum ast_audiohook_direction direction, int readvol, int writevol,
 				  const char *post_process, const char *uid_channel_var, const char *beep_id)
 {
 	pthread_t thread;
@@ -640,6 +633,8 @@ static int launch_audiofork_thread(struct ast_channel *chan, const char *wsserve
     ast_verb(2, "setting wsserver to %s\r\n", wsserver);
 		audiofork->wsserver = ast_strdup(wsserver);
 	}
+  ast_verb(2, "setting direction to %d\r\n", direction);
+  audiofork->direction = direction;
 
 	if (setup_audiofork_ds(audiofork, chan, &datastore_id, beep_id)) {
 		ast_autochan_destroy(audiofork->autochan);
@@ -690,6 +685,7 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 	int x, readvol = 0, writevol = 0;
 	char *uid_channel_var = NULL;
 	char beep_id[64] = "";
+	unsigned int direction = 2;
 
 	struct ast_flags flags = { 0 };
 	char *parse;
@@ -761,6 +757,24 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 				return -1;
 			}
 		}
+    if (ast_test_flag(&flags, MUXFLAG_DIRECTION)) {
+      const char *direction_str = S_OR(opts[OPT_ARG_DIRECTION], "both"); //default to both directions
+
+      if (strcmp(direction_str,"in")) {
+        direction = 0;
+      } else if (strcmp(direction_str,"out")) {
+        direction = 1;
+      } else if (strcmp(direction_str,"both")) {
+        direction = 2;
+      } else {
+        direction = 2;
+				ast_log(LOG_WARNING, "Invalid direction '%s' given. Using default of %u\n",
+						direction_str, direction);
+			}
+
+	}
+
+
 	}
 	/* If there are no file writing arguments/options for the mix monitor, send a warning message and return -1 */
 
@@ -780,6 +794,7 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 	if (launch_audiofork_thread(chan,
 			args.wsserver,
 			flags.flags,
+      direction,
 			readvol,
 			writevol,
 			args.post_process,
