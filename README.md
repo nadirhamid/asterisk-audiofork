@@ -38,7 +38,7 @@ asterisk -rx 'core reload'
 
 # configuring in dial plans
 
-here is an example of how to use "AudioFork()"
+here is a simple example of how to use "AudioFork()"
 
 ```
 exten => _X.,1,Answer()
@@ -88,8 +88,81 @@ below is an example using sox to convert audio received into a format like WAV.
 sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 ```
 
+# sending separate WS streams
 
-# roadmap
+below is an example of a dialplan that can send 2 separate streams to a websocket server. in this example the basic dialplan and the websocket server has been modified to accept separate URL paths so that we can save to two separate files depending on which direction of the call we are processing. 
+
+updated dialplan
+
+```
+[main-out]
+exten => _.,1,Verbose(call was placed..)
+same => n,Answer()
+same => n,AudioFork(ws://localhost:8080/out,D(out))
+same => n,Dial(SIP/1001,60,gM(in))
+same => n,Hangup()
+
+[macro-in]
+exten => _.,1,Verbose(macro-in called)
+same => n,AudioFork(ws://localhost:8080/in,D(out))
+```
+
+node.js server implementation
+
+```
+const http = require('http');
+const WebSocket = require('ws');
+const url = require('url');
+const fs = require('fs');
+
+const server = http.createServer();
+const wss1 = new WebSocket.Server({ noServer: true });
+const wss2 = new WebSocket.Server({ noServer: true });
+var outstream = fs.createWriteStream('out.raw');
+var instream = fs.createWriteStream('in.raw');
+
+
+wss1.on('connection', function connection(ws) {
+  // ...
+  console.log("got out connection ");
+
+  ws.on('message', function incoming(message) {
+    console.log('received out frame..');
+    outstream.write(message);
+  });
+});
+
+wss2.on('connection', function connection(ws) {
+  // ...
+  console.log("got in connection ");
+
+  ws.on('message', function incoming(message) {
+    console.log('received in frame..');
+    instream.write(message);
+  });
+
+});
+
+server.on('upgrade', function upgrade(request, socket, head) {
+  const pathname = url.parse(request.url).pathname;
+
+  if (pathname === '/out') {
+    wss1.handleUpgrade(request, socket, head, function done(ws) {
+      wss1.emit('connection', ws, request);
+    });
+  } else if (pathname === '/in') {
+    wss2.handleUpgrade(request, socket, head, function done(ws) {
+      wss2.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+server.listen(8080);
+```
+
+# project roadmap
 
 below is a list of updates planned for the module:
 
@@ -103,7 +176,7 @@ below is a list of updates planned for the module:
 
 # contact info
 
-for any queries / more info please connect me directly:
+for any queries / more info please contact me directly:
 ```
 Nadir Hamid <matrix.nad@gmail.com>
 ```
