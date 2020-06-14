@@ -61,6 +61,7 @@
 #include "asterisk/astobj2.h"
 #include "asterisk/pbx.h"
 #include "asterisk/http_websocket.h"
+#include "asterisk/tcptls.h"
 
 
 
@@ -293,6 +294,12 @@ struct audiofork {
   struct ast_audiohook audiohook;
   struct ast_websocket *websocket;
   char *wsserver;
+  struct ast_tls_config *tls_cfg;
+  char *tcert;
+  char *tcpvt;
+  char *tcipher;
+  char *tca;
+  char *tcpath;
   enum ast_audiohook_direction direction;
   char *post_process;
   char *name;
@@ -308,6 +315,7 @@ struct audiofork {
                              AST_STRING_FIELD(call_callerchan);
                              AST_STRING_FIELD(call_callerid););
   int call_priority;
+  int has_tls;
 };
 
 enum audiofork_flags {
@@ -322,7 +330,8 @@ enum audiofork_flags {
   MUXFLAG_BEEP_START = (1 << 12),
   MUXFLAG_BEEP_STOP = (1 << 13),
   MUXFLAG_RWSYNC = (1 << 14),
-  MUXFLAG_DIRECTION = (1 << 15)
+  MUXFLAG_DIRECTION = (1 << 15),
+  MUXFLAG_TLS = (1 << 16),
 };
 
 enum audiofork_args {
@@ -333,6 +342,7 @@ enum audiofork_args {
   OPT_ARG_BEEP_INTERVAL,
   OPT_ARG_RWSYNC,
   OPT_ARG_DIRECTION,
+  OPT_ARG_TLS,
   OPT_ARG_ARRAY_SIZE,           /* Always last element of the enum */
 };
 
@@ -349,8 +359,9 @@ AST_APP_OPTIONS(audiofork_opts, {
                                                                             OPT_ARG_VOLUME),
                 AST_APP_OPTION_ARG('i', MUXFLAG_UID, OPT_ARG_UID),
                 AST_APP_OPTION_ARG('S', MUXFLAG_RWSYNC, OPT_ARG_RWSYNC),
-                AST_APP_OPTION_ARG('D', MUXFLAG_DIRECTION,
-                                   OPT_ARG_DIRECTION),});
+                AST_APP_OPTION_ARG('D', MUXFLAG_DIRECTION, OPT_ARG_DIRECTION),
+                AST_APP_OPTION_ARG('T', MUXFLAG_TLS, OPT_ARG_TLS),
+});
 
 struct audiofork_ds {
   unsigned int destruction_ok;
@@ -364,6 +375,7 @@ struct audiofork_ds {
   unsigned int samp_rate;
   char *wsserver;
   char *beep_id;
+  struct ast_tls_config *tls_cfg;
 };
 
 static void audiofork_ds_destroy(void *data)
@@ -438,9 +450,16 @@ static void *audiofork_thread(void *obj)
   ast_verb(2, "Connecting websocket server at %s\n",
            audiofork->audiofork_ds->wsserver);
 
-  audiofork->websocket =
-    ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL,
-                                &result);
+  //check if we're running with TLS
+  if (audiofork->has_tls == 1) {
+    audiofork->websocket =
+      ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg, 
+                                  &result);
+  } else {
+    audiofork->websocket =
+      ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL,
+                                  &result);
+  }
 
   if (result != WS_OK) {
     ast_log(LOG_ERROR, "Could not connect to websocket on audio form %s\n",
@@ -596,6 +615,11 @@ static int setup_audiofork_ds(struct audiofork *audiofork,
 static int launch_audiofork_thread(struct ast_channel *chan,
                                    const char *wsserver, unsigned int flags,
                                    enum ast_audiohook_direction direction,
+                                   char* tcert,
+                                   char* tcpvt,
+                                   char* tcipher,
+                                   char* tca,
+                                   char* tcpath,
                                    int readvol, int writevol,
                                    const char *post_process,
                                    const char *uid_channel_var,
@@ -655,6 +679,35 @@ static int launch_audiofork_thread(struct ast_channel *chan,
   ast_verb(2, "setting direction to %d\r\n", direction);
   audiofork->direction = direction;
 
+  audiofork->has_tls = 0;
+  if (!ast_strlen_zero(tcert)) {
+    ast_verb(2, "setting TLS Cert to %s\r\n", tcert);
+    struct ast_tls_config  *ast_tls_config;
+    audiofork->tls_cfg = ast_calloc(1, sizeof(*ast_tls_config));
+    audiofork->has_tls = 1;
+    audiofork->tls_cfg->certfile = tcert;
+  }
+
+  if (!ast_strlen_zero(tcpvt)) {
+    ast_verb(2, "setting TLS Pvt to %s\r\n", tcpvt);
+    audiofork->tls_cfg->pvtfile = tcpvt;
+  }
+
+  if (!ast_strlen_zero(tcipher)) {
+    ast_verb(2, "setting TLS Cipher to %s\r\n", tcipher);
+    audiofork->tls_cfg->cafile = tca;
+  }
+
+  if (!ast_strlen_zero(tca)) {
+    ast_verb(2, "setting TLS CA to %s\r\n", tca);
+    audiofork->tls_cfg->capath= tcpath;
+  }
+
+  if (!ast_strlen_zero(tcpath)) {
+    ast_verb(2, "setting TLS CA Path to %s\r\n", tcpath);
+    audiofork->tcpath = tcpath;
+  }
+
   if (setup_audiofork_ds(audiofork, chan, &datastore_id, beep_id)) {
     ast_autochan_destroy(audiofork->autochan);
     audiofork_free(audiofork);
@@ -709,6 +762,12 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
   struct ast_flags flags = { 0 };
   char *parse;
+  char *tca = NULL;
+  char *tcert = NULL;
+  char *tcipher = NULL;
+  char *tcpvt = NULL;
+  char *tcpath = NULL;
+  char *certdata = NULL;
   AST_DECLARE_APP_ARGS(args,
                        AST_APP_ARG(wsserver);
                        AST_APP_ARG(options); AST_APP_ARG(post_process););
@@ -807,7 +866,26 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
     }
 
-
+    if (ast_test_flag(&flags, MUXFLAG_TLS)) {
+      certdata = S_OR(opts[OPT_ARG_TLS], "");
+      char* pt = strtok (certdata,",");
+      int pos = 0;
+      while (pt != NULL) {
+	if ( pos == 0 ) {
+		tcert = ast_strdup( pt );
+	} else if ( pos == 1 ) {
+		tcpvt = ast_strdup( pt );
+	} else if ( pos == 2 ) {
+		tcipher= ast_strdup( pt );
+	} else if ( pos == 3 ) {
+		tca= ast_strdup( pt );
+	} else if ( pos == 4 ) {
+		tcpath = ast_strdup( pt );
+	}
+        pt = strtok (NULL, ",");
+	pos = pos + 1;
+      }
+    }
   }
   /* If there are no file writing arguments/options for the mix monitor, send a warning message and return -1 */
 
@@ -828,6 +906,11 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
                               args.wsserver,
                               flags.flags,
                               direction,
+                              tcert,
+                              tcpvt,
+                              tcipher,
+                              tca,
+                              tcpath,
                               readvol,
                               writevol,
                               args.post_process, uid_channel_var, beep_id)) {
@@ -1236,3 +1319,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT,
                 "Audio Forking application",.support_level =
                 AST_MODULE_SUPPORT_CORE,.load = load_module,.unload =
                 unload_module,.optional_modules = "func_periodic_hook",);
+
