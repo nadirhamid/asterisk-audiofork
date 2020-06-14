@@ -131,6 +131,14 @@
 					<option name="P">
 						<para>Play a beep on the channel that stops the recording.</para>
 					</option>
+					<option name="D">
+						<para>Direction of audiohook to process - supports in, out, and both</para>
+					</option>
+					<option name="Tj">
+						<para>comma separated TLS config for secure websocket connections</para>
+					</option>
+
+
 				</optionlist>
 			</parameter>
 			<parameter name="command">
