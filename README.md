@@ -183,7 +183,6 @@ below is a list of updates planned for the module:
   - applying volume gain to AudioFork
   - muting AudioFork
 - store responses pushed from websocket server into channel var
-- add support for SSL connections (maybe)
 
 # contact info
 
