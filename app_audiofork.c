@@ -850,6 +850,8 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
     }
     if (ast_test_flag(&flags, MUXFLAG_DIRECTION)) {
       const char *direction_str = S_OR(opts[OPT_ARG_DIRECTION], "both");        //default to both directions
+      ast_verb(2, "Parsing direction %s\n",
+           direction_str);
 
       if (strcmp(direction_str, "in")) {
         direction = 0;
@@ -868,6 +870,9 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
     if (ast_test_flag(&flags, MUXFLAG_TLS)) {
       certdata = S_OR(opts[OPT_ARG_TLS], "");
+      ast_verb(2, "Parsing TLS config %s\n",
+           certdata);
+
       char* pt = strtok (certdata,",");
       int pos = 0;
       while (pt != NULL) {
@@ -885,6 +890,9 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
         pt = strtok (NULL, ",");
 	pos = pos + 1;
       }
+      ast_verb(2, "Parsing TLS result tcert: %s, tcpvt: %s, tcipher: %s, tca: %s, tcpath: %s\n",
+           tcert, tcpvt, tcipher, tca, tcpath);
+
     }
   }
   /* If there are no file writing arguments/options for the mix monitor, send a warning message and return -1 */
