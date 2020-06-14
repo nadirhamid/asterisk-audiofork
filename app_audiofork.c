@@ -134,7 +134,7 @@
 					<option name="D">
 						<para>Direction of audiohook to process - supports in, out, and both</para>
 					</option>
-					<option name="Tj">
+					<option name="T">
 						<para>comma separated TLS config for secure websocket connections</para>
 					</option>
 
