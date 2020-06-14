@@ -162,6 +162,17 @@ server.on('upgrade', function upgrade(request, socket, head) {
 server.listen(8080);
 ```
 
+# TLS support
+
+AudioFork() currently supports secure websocket connections. in order to create a secure websocket connection you must specify the "T" option in the "AudioFork()" app options.
+
+for example:
+```
+AudioFork(wss://example.org/in,D(out)T(certfile,pvtfile,cipher,cafile,capath))
+```
+
+all paths to CA files should be absolute.
+
 # project roadmap
 
 below is a list of updates planned for the module:
