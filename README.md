@@ -164,7 +164,7 @@ server.listen(8080);
 
 # TLS support
 
-AudioFork() currently supports secure websocket connections. in order to create a secure websocket connection you must specify the "T" option in the "AudioFork()" app options.
+AudioFork() currently supports secure websocket connections. in order to create a secure websocket connection, you must specify the "T" option in the "AudioFork()" app options.
 
 for example:
 ```
@@ -183,7 +183,6 @@ below is a list of updates planned for the module:
   - applying volume gain to AudioFork
   - muting AudioFork
 - store responses pushed from websocket server into channel var
-- add support for SSL connections (maybe)
 
 # contact info
 
