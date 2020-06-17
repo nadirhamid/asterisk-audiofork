@@ -8,7 +8,8 @@ the asterisk app works as a small "fork" between your dialplan and app logic.
 ASTERISK -> AUDIO STREAM -> WS APP SERVER
 ```
 
-the main purpose of this app is to give third party apps a shot at processing audio streams as they are live on an asterisk channel. as well as being able to quickly offload audio processing to another server or script.
+
+the main purpose of this app is to quickly offload audio streams to another script or app -- allowing the implementor to add higher level integrations to the audio processing.
 
 # how to install
 
@@ -55,7 +56,7 @@ you will need to use a websocket server that supports receiving binary frames.
 below is one written in node.js that was also used during testing:
 
 [WebSocket nodejs server](https://github.com/websockets/ws)
-* although you can use any of your preference
+* NOTE: you will need to use version 7.2.0 or below as there is currently a client side masking issue in res_http_websocket.c
 
 
 # example for receving on the server side
@@ -161,6 +162,10 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
 server.listen(8080);
 ```
+
+# Live transcription demo
+
+for a demo integration with Google Cloud speech APIs, please see: [Asterisk Transcribe Demo](https://github.com/nadirhamid/audiofork-transcribe-demo)
 
 # TLS support
 
