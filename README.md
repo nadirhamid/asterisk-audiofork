@@ -9,7 +9,7 @@ ASTERISK -> AUDIO STREAM -> WS APP SERVER
 ```
 
 
-the main purpose of this app is to quickly offload audio streams to another script or app -- allowing the implementor to add higher level integrations to the audio processing.
+the main purpose of this app is to quickly offload audio streams to another script or app -- allowing implementors to add higher levels of audio processing to their dialplan.
 
 # how to install
 
