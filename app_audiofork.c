@@ -23,7 +23,7 @@
 
 /*! \file
  *
- * \brief AudioFork() - Record a call and mix the audio during the recording
+ * \brief AudioFork() - Offload Asterisk audio processing to a Websocket server.
  * \ingroup applications
  *
  * \author Nadir Hamid <matrix.nad@gmail.com>
