@@ -880,23 +880,25 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
       certdata = S_OR(opts[OPT_ARG_TLS], "");
       ast_verb(2, "Parsing TLS config %s\n",
            certdata);
-
-      char* pt = strtok (certdata,",");
+      char *rest = NULL;
+      char* pt = strtok_r(certdata,",",&rest);
       int pos = 0;
+
       while (pt != NULL) {
-	if ( pos == 0 ) {
-		tcert = ast_strdup( pt );
-	} else if ( pos == 1 ) {
-		tcpvt = ast_strdup( pt );
-	} else if ( pos == 2 ) {
-		tcipher= ast_strdup( pt );
-	} else if ( pos == 3 ) {
-		tca= ast_strdup( pt );
-	} else if ( pos == 4 ) {
-		tcpath = ast_strdup( pt );
-	}
-        pt = strtok (NULL, ",");
-	pos = pos + 1;
+        if ( pos == 0 ) {
+          tcert = ast_strdup( pt );
+        } else if ( pos == 1 ) {
+          tcpvt = ast_strdup( pt );
+        } else if ( pos == 2 ) {
+          tcipher= ast_strdup( pt );
+        } else if ( pos == 3 ) {
+          tca= ast_strdup( pt );
+        } else if ( pos == 4 ) {
+          tcpath = ast_strdup( pt );
+        }
+
+        pt = strtok_r(NULL,",",&rest) 
+	      pos = pos + 1;
       }
       ast_verb(2, "Parsing TLS result tcert: %s, tcpvt: %s, tcipher: %s, tca: %s, tcpath: %s\n",
            tcert, tcpvt, tcipher, tca, tcpath);
