@@ -897,8 +897,8 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
           tcpath = ast_strdup( pt );
         }
 
-        pt = strtok_r(NULL,",",&rest) 
-	      pos = pos + 1;
+        pt = strtok_r(NULL,",",&rest);
+	pos = pos + 1;
       }
       ast_verb(2, "Parsing TLS result tcert: %s, tcpvt: %s, tcipher: %s, tca: %s, tcpath: %s\n",
            tcert, tcpvt, tcipher, tca, tcpath);
