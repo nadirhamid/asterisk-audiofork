@@ -375,6 +375,7 @@ struct audiofork_ds {
   unsigned int destruction_ok;
   ast_cond_t destruction_condition;
   ast_mutex_t lock;
+  struct ast_websocket *websocket;
   /**
    * the audio hook we will use for sending raw audio
    */
@@ -460,11 +461,11 @@ static void *audiofork_thread(void *obj)
 
   //check if we're running with TLS
   if (audiofork->has_tls == 1) {
-    audiofork->websocket =
+    audiofork->audiofork_ds->websocket =
       ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg, 
                                   &result);
   } else {
-    audiofork->websocket =
+    audiofork->audiofork_ds->websocket =
       ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL,
                                   &result);
   }
@@ -517,7 +518,7 @@ static void *audiofork_thread(void *obj)
       //ast_verb(2, "sending audio frame to websocket...\n");
       //ast_mutex_lock(&audiofork->audiofork_ds->lock);
       if (ast_websocket_write
-          (audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr,
+          (audiofork->audiofork_ds->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr,
            cur->datalen)) {
         ast_log(LOG_ERROR, "could not write to websocket on audiofork %s.\n",
                 audiofork->name);
@@ -536,6 +537,8 @@ static void *audiofork_thread(void *obj)
   }
 
   ast_audiohook_unlock(&audiofork->audiohook);
+  ast_websocket_close(audiofork->audiofork_ds->websocket, 1000);
+  audiofork->audiofork_ds->websocket = NULL;
 
   if (ast_test_flag(audiofork, MUXFLAG_BEEP_STOP)) {
     ast_autochan_channel_lock(audiofork->autochan);
@@ -983,6 +986,8 @@ static int stop_audiofork_full(struct ast_channel *chan, const char *data)
     beep_id = ast_strdupa(audiofork_ds->beep_id);
   }
 
+  ast_websocket_close(audiofork_ds->websocket, 1000);
+  audiofork_ds->websocket = NULL;
   ast_mutex_unlock(&audiofork_ds->lock);
 
   /* Remove the datastore so the monitor thread can exit */
