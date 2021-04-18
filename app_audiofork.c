@@ -455,26 +455,6 @@ static void *audiofork_thread(void *obj)
 {
   struct audiofork *audiofork = obj;
   struct ast_format *format_slin;
-  enum ast_websocket_result result;
-  ast_verb(2, "Connecting websocket server at %s\n",
-           audiofork->audiofork_ds->wsserver);
-
-  //check if we're running with TLS
-  if (audiofork->has_tls == 1) {
-    audiofork->audiofork_ds->websocket =
-      ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg, 
-                                  &result);
-  } else {
-    audiofork->audiofork_ds->websocket =
-      ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL,
-                                  &result);
-  }
-
-  if (result != WS_OK) {
-    ast_log(LOG_ERROR, "Could not connect to websocket on audio form %s\n",
-            audiofork->name);
-    return NULL;
-  }
 
   /* Keep callid association before any log messages */
   if (audiofork->callid) {
@@ -580,6 +560,7 @@ static int setup_audiofork_ds(struct audiofork *audiofork,
 {
   struct ast_datastore *datastore = NULL;
   struct audiofork_ds *audiofork_ds;
+  enum ast_websocket_result result;
 
   if (!(audiofork_ds = ast_calloc(1, sizeof(*audiofork_ds)))) {
     return -1;
@@ -614,6 +595,28 @@ static int setup_audiofork_ds(struct audiofork *audiofork,
     audiofork_ds->beep_id = ast_strdup(beep_id);
   }
   datastore->data = audiofork_ds;
+
+
+  ast_verb(2, "Connecting websocket server at %s\n",
+           audiofork->audiofork_ds->wsserver);
+
+  //check if we're running with TLS
+  if (audiofork->has_tls == 1) {
+    audiofork_ds->websocket =
+      ast_websocket_client_create(audiofork_ds->wsserver, "echo", audiofork->tls_cfg, 
+                                  &result);
+  } else {
+    audiofork_ds->websocket =
+      ast_websocket_client_create(audiofork_ds->wsserver, "echo", NULL,
+                                  &result);
+  }
+
+  if (result != WS_OK) {
+    ast_log(LOG_ERROR, "Could not connect to websocket on audio form %s\n",
+            audiofork->name);
+    return -1;
+  }
+
 
   ast_channel_lock(chan);
   ast_channel_datastore_add(chan, datastore);
@@ -719,6 +722,8 @@ static int launch_audiofork_thread(struct ast_channel *chan,
     audiofork->tcpath = tcpath;
   }
 
+  audiofork->name = ast_strdup(ast_channel_name(chan));
+
   if (setup_audiofork_ds(audiofork, chan, &datastore_id, beep_id)) {
     ast_autochan_destroy(audiofork->autochan);
     audiofork_free(audiofork);
@@ -732,8 +737,6 @@ static int launch_audiofork_thread(struct ast_channel *chan,
     }
   }
   ast_free(datastore_id);
-
-  audiofork->name = ast_strdup(ast_channel_name(chan));
 
   if (!ast_strlen_zero(postprocess2)) {
     audiofork->post_process = ast_strdup(postprocess2);
