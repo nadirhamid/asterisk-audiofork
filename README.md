@@ -173,7 +173,7 @@ AudioFork() currently supports secure websocket connections. in order to create 
 
 for example:
 ```
-AudioFork(wss://example.org/in,D(out)T(certfile,pvtfile,cipher,cafile,capath))
+AudioFork(wss://example.org/in,D(out)T(on))
 ```
 
 all paths to CA files should be absolute.
