@@ -176,8 +176,6 @@ for example:
 AudioFork(wss://example.org/in,D(out)T(on))
 ```
 
-all paths to CA files should be absolute.
-
 # project roadmap
 
 below is a list of updates planned for the module:
