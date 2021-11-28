@@ -56,7 +56,6 @@ you will need to use a websocket server that supports receiving binary frames.
 below is one written in node.js that was also used during testing:
 
 [WebSocket nodejs server](https://github.com/websockets/ws)
-* NOTE: you will need to use version 7.2.0 or below as there is currently a client side masking issue in res_http_websocket.c
 
 
 # example for receving on the server side
