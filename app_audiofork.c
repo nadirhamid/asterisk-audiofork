@@ -578,8 +578,9 @@ static void *audiofork_thread(void *obj)
 						reconn_failed = 0;
 						break;
 					}
-					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnect failed... trying again in %d seconds\n",
-									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout );
+
+					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining\n",
+									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout, (reconn_attempts-reconn_counter) );
 
 					reconn_counter ++;
 					reconn_failed = 1;
