@@ -572,21 +572,23 @@ static void *audiofork_thread(void *obj)
 				ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnecting...\n",
 								ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 
-				result = audiofork_ws_connect(audiofork);
 				while ( reconn_counter < reconn_attempts ) {
 					result = audiofork_ws_connect(audiofork);
-					if (result != WS_OK) {
-						ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnect failed... trying again in %d seconds\n",
-										ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout );
-
-						reconn_counter ++;
-						usleep( reconn_timeout );
-						continue;
+					if (result == WS_OK) {
+						reconn_failed = 0;
+						break;
 					}
+					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnect failed... trying again in %d seconds\n",
+									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout );
+
+					reconn_counter ++;
+					reconn_failed = 1;
+					usleep( reconn_timeout );
 				}
-				if ( reconn_failed ) {
+				if ( reconn_failed == 1 ) {
 					audiofork->websocket = NULL;
 					audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
+					break;
 				}
 
 				/* re-send the last frame */
