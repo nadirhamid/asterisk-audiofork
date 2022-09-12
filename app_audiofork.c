@@ -496,6 +496,9 @@ static void *audiofork_thread(void *obj)
 	int reconn_failed = 0;
 	int reconn_timeout = audiofork->reconnection_timeout;
 	int reconn_attempts = audiofork->reconnection_attempts;
+	int reconn_last_attempt = 0;
+	int reconn_now;
+	int reconn_delta;
 
 
 
@@ -573,18 +576,25 @@ static void *audiofork_thread(void *obj)
 								ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 
 				while ( reconn_counter < reconn_attempts ) {
+					reconn_now = (int)time(NULL);
+					reconn_delta = reconn_now - reconn_last_attempt;
+					//ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection delta %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_delta);
+
+					if ( reconn_last_attempt != 0 && reconn_delta <=  reconn_timeout ) {
+						continue;
+					}
 					result = audiofork_ws_connect(audiofork);
 					if (result == WS_OK) {
 						reconn_failed = 0;
 						break;
 					}
+					reconn_last_attempt=(int)time(NULL);
 
-					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining\n",
-									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout, (reconn_attempts-reconn_counter) );
+					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n",
+									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout, (reconn_attempts-reconn_counter), reconn_now, reconn_last_attempt );
 
 					reconn_counter ++;
 					reconn_failed = 1;
-					usleep( reconn_timeout );
 				}
 				if ( reconn_failed == 1 ) {
 					audiofork->websocket = NULL;
@@ -791,8 +801,8 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 
 	// TODO: make this configurable
 	audiofork->reconnection_attempts = 5;
-	// 30 seconds
-	audiofork->reconnection_timeout = 30;
+	// 5 seconds
+	audiofork->reconnection_timeout = 5;
 
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection attempts to %d\n", ast_channel_name(chan), audiofork->reconnection_attempts);
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection timeout to %d\n", ast_channel_name(chan), audiofork->reconnection_timeout);
