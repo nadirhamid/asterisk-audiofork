@@ -580,12 +580,14 @@ static void *audiofork_thread(void *obj)
 					reconn_delta = reconn_now - reconn_last_attempt;
 					//ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection delta %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_delta);
 
+					// check if reconnection was initiated, and if it was ensure that reocnnection delay is less than the max allowed timeout
 					if ( reconn_last_attempt != 0 && reconn_delta <=  reconn_timeout ) {
 						continue;
 					}
 					result = audiofork_ws_connect(audiofork);
 					if (result == WS_OK) {
 						reconn_failed = 0;
+						reconn_last_attempt = 0;
 						break;
 					}
 					reconn_last_attempt=(int)time(NULL);
