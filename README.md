@@ -175,6 +175,24 @@ for example:
 AudioFork(wss://example.org/in,D(out)T(on))
 ```
 
+# Reconnecting closed sockets
+
+It is also possible to setup basic backoff for reconnection. By default, Audiofork is configured to reconnect to the WS server, and after a preconfigured number of attempts it will close the connection. These parameters, however, can be adjusted.
+
+To adjust the reconnection parameters you can use the following parameters:
+
+```
+R(timeout_for_connection)
+r(number of times to attempt reconnection)
+```
+
+For instance, the following example will set the reconnection timeout to 10 seconds and attempt to reconnect five times.
+
+```
+AudioFork(wss://example.org/in,R(10)r(5))
+```
+
+
 # project roadmap
 
 below is a list of updates planned for the module:
