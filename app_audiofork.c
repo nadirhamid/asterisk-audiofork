@@ -135,8 +135,12 @@
 					<option name="T">
 						<para>comma separated TLS config for secure websocket connections</para>
 					</option>
-
-
+					<option name="R">
+						<para>Timeout for reconnections</para>
+					</option>
+					<option name="r">
+						<para>Number of times to attempt reconnect before closing connections</para>
+					</option>
 				</optionlist>
 			</parameter>
 			<parameter name="command">
