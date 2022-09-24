@@ -337,6 +337,8 @@ enum audiofork_flags {
 	MUXFLAG_RWSYNC = (1 << 14),
 	MUXFLAG_DIRECTION = (1 << 15),
 	MUXFLAG_TLS = (1 << 16),
+	MUXFLAG_RECONNECTION_TIMEOUT = (1 << 17),
+	MUXFLAG_RECONNECTION_ATTEMPTS = (1 << 17),
 };
 
 enum audiofork_args {
@@ -348,6 +350,8 @@ enum audiofork_args {
 	OPT_ARG_RWSYNC,
 	OPT_ARG_DIRECTION,
 	OPT_ARG_TLS,
+	OPT_ARG_RECONNECTION_TIMEOUT,
+	OPT_ARG_RECONNECTION_ATTEMPTS,
 	OPT_ARG_ARRAY_SIZE,           /* Always last element of the enum */
 };
 
@@ -366,6 +370,8 @@ AST_APP_OPTIONS(audiofork_opts, {
 								AST_APP_OPTION_ARG('S', MUXFLAG_RWSYNC, OPT_ARG_RWSYNC),
 								AST_APP_OPTION_ARG('D', MUXFLAG_DIRECTION, OPT_ARG_DIRECTION),
 								AST_APP_OPTION_ARG('T', MUXFLAG_TLS, OPT_ARG_TLS),
+								AST_APP_OPTION_ARG('R', MUXFLAG_RECONNECTION_TIMEOUT, OPT_ARG_RECONNECTION_TIMEOUT),
+								AST_APP_OPTION_ARG('r', MUXFLAG_RECONNECTION_ATTEMPTS, OPT_ARG_RECONNECTION_ATTEMPTS),
 });
 
 struct audiofork_ds {
@@ -738,6 +744,8 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 																	 const char *wsserver, unsigned int flags,
 																	 enum ast_audiohook_direction direction,
 																	 char* tcert,
+																	 int reconn_timeout,
+																	 int reconn_attempts,
 																	 int readvol, int writevol,
 																	 const char *post_process,
 																	 const char *uid_channel_var,
@@ -809,9 +817,9 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 
 
 	// TODO: make this configurable
-	audiofork->reconnection_attempts = 5;
+	audiofork->reconnection_attempts = reconn_attempts;
 	// 5 seconds
-	audiofork->reconnection_timeout = 5;
+	audiofork->reconnection_timeout = reconn_timeout;
 
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection attempts to %d\n", ast_channel_name(chan), audiofork->reconnection_attempts);
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection timeout to %d\n", ast_channel_name(chan), audiofork->reconnection_timeout);
@@ -895,6 +903,8 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 	struct ast_flags flags = { 0 };
 	char *parse;
 	char *tcert = NULL;
+	int reconn_timeout = 5;
+	int reconn_attempts = 5;
 	AST_DECLARE_APP_ARGS(args,
 											 AST_APP_ARG(wsserver);
 											 AST_APP_ARG(options); AST_APP_ARG(post_process););
@@ -997,6 +1007,16 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 			tcert = ast_strdup ( S_OR(opts[OPT_ARG_TLS], "") );
 			ast_verb(2, "Parsing TLS result tcert: %s\n", tcert);
 		}
+
+		if (ast_test_flag(&flags, MUXFLAG_RECONNECTION_TIMEOUT)) {
+			reconn_timeout = atoi( S_OR(opts[OPT_ARG_RECONNECTION_TIMEOUT], "15") );
+			ast_verb(2, "Reconnection timeout set to: %d\n", reconn_timeout);
+		}
+
+		if (ast_test_flag(&flags, MUXFLAG_RECONNECTION_ATTEMPTS)) {
+			reconn_attempts = atoi( S_OR(opts[OPT_ARG_RECONNECTION_ATTEMPTS], "15") );
+			ast_verb(2, "Reconnection attempts set to: %d\n", reconn_attempts);
+		}
 	}
 
 	/* If there are no file writing arguments/options for the mix monitor, send a warning message and return -1 */
@@ -1020,6 +1040,8 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 															flags.flags,
 															direction,
 															tcert,
+															reconn_timeout,
+															reconn_attempts,
 															readvol,
 															writevol,
 															args.post_process, uid_channel_var, beep_id)) {
