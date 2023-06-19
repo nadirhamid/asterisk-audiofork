@@ -84,9 +84,9 @@ sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 
 # Sending separate Websocket streams
 
-In a production scenario, it is common to handle both legs of the call, incoming and outgoing. 
+In a production scenario, it is common to handle both the incoming and outgoing legs of a call.  The basic example doesn't do that, but it is certainly possible.
 
-Below is an example including a WebSocket server that receives two connections and stores each stream in its own unique file.
+Below is an example including a WebSocket server that handles two connections and stores each stream in its own unique file.
 
 Updated dialplan
 
