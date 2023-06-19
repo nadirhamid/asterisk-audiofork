@@ -86,7 +86,7 @@ sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 
 In a production scenario, it is common to handle both legs of the call, incoming and outgoing. 
 
-Below is an example including a WebSocket server that receives two connections and stores each stream contents in its own unique file.
+Below is an example including a WebSocket server that receives two connections and stores each stream in its own unique file.
 
 Updated dialplan
 
