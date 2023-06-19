@@ -45,11 +45,10 @@ exten => _X.,n,Hangup()
 
 # Configuring a Websocket server
 
-In order to integrate the module, it is advised that you use a websocket server that supports receiving binary frames. 
+In order to integrate the module, it is advised that you use a websocket server that is compliant with the latest standard. In other words, it should support both text and binary data frames.
 
-Here is one written in Node.js:
+Here is an example of a Node.js Websocket module:
 [WebSocket nodejs server](https://github.com/websockets/ws)
-
 
 # Example: simple integration
 
@@ -85,7 +84,9 @@ sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 
 # Sending separate Websocket streams
 
-In a production scenario, it is common to handle both legs of the call, incoming and outgoing. Below is an example including a WebSocket server that receives two connection and stores each stream contents in its own unique file.
+In a production scenario, it is common to handle both legs of the call, incoming and outgoing. 
+
+Below is an example including a WebSocket server that receives two connections and stores each stream contents in its own unique file.
 
 Updated dialplan
 
