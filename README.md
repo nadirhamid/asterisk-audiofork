@@ -1,45 +1,38 @@
-## what is app_audiofork
+## What is app_audiofork
 
 app_audiofork lets you integrate raw audio streams in your third party app by making minor adjustments to your asterisk dialplan. 
 
-the asterisk app works as a small "fork" between your dialplan and app logic. 
+The asterisk app simply pushes any Asterisk audio to a web socket server.
 
+For example:
 ```
 ASTERISK -> AUDIO STREAM -> WS APP SERVER
 ```
 
+The main purpose of this app is to provide a simple integration with the Asterisk audiohooks API -- allowing developers to integrate higher level programs for audio processing.
 
-the main purpose of this app is to quickly offload audio streams to another script or app – allowing implementors to add higher levels of audio processing to their dialplan.
+# How to install
 
-# how to install
+You can use the Makefile to easily install app_audiofork. 
 
-this is not officially a builtin asterisk module so you will have to drop files into the asterisk codebase. 
-please use the following steps to install the module:
+To get started, please run:
 
-1. copy "app_audiofork.c" to "asterisk/apps/app_audiofork.c"
-2. cd into your asterisk source tree
-3. refresh the menuselect options
-```
-rm -f ./menuselect.makeopts
-```
-4. re run menuselect
-```
-make menuselect
-```
-* app_audiofork should be listed under "Applications" and selected by default.
-5. install asterisk
 ```
 make
 make install
 ```
-6. reload asterisk
-```
-asterisk -rx 'core reload'
-```
 
-# configuring in dial plans
+## Load module
 
-here is a simple example of how to use "AudioFork()"
+Afterwards, you will need to load the module.
+
+You can simply run the following command:
+
+asterisk -rx 'module load app_audiofork.so'
+
+# Configuring in dial plans
+
+Here is a simple example of how to use "AudioFork()"
 
 ```
 exten => _X.,1,Answer()
@@ -50,17 +43,17 @@ exten => _X.,n,Playback(hello-world)
 exten => _X.,n,Hangup()
 ```
 
-# configuring a websocket server
+# Configuring a Websocket server
 
-you will need to use a websocket server that supports receiving binary frames. 
-below is one written in node.js that was also used during testing:
+In order to integrate the module, it is advised that you use a websocket server that supports receiving binary frames. 
 
+Here is one written in Node.js:
 [WebSocket nodejs server](https://github.com/websockets/ws)
 
 
-# example for receving on the server side
+# Example: simple integration
 
-below is an example that receives audio frames from "AudioFork()" and stores them into a file.
+Below is an example that receives audio frames from the AudioFork app and stores them into a audio file.
 
 ```
 const WebSocket = require('ws');
@@ -80,19 +73,21 @@ wss.on('connection', function connection(ws) {
 ```
 
 
-# converting raw audio to WAV
+# Converting raw audio to WAV
 
-below is an example using sox to convert audio received into a format like WAV.
+You can quickly convert any raw audio data to a another format, such as WAV, using the Sox command line tool.
+
+For example:
 
 ```
 sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 ```
 
-# sending separate WS streams
+# Sending separate Websocket streams
 
-below is an example of a dialplan that can send 2 separate streams to a websocket server. in this example the basic dialplan and the websocket server has been modified to accept separate URL paths so that we can save to two separate files depending on which direction of the call we are processing. 
+In a production scenario, it is common to handle both legs of the call, incoming and outgoing. Below is an example including a WebSocket server that receives two connection and stores each stream contents in its own unique file.
 
-updated dialplan
+Updated dialplan
 
 ```
 [main-out]
@@ -107,7 +102,7 @@ exten => _.,1,Verbose(macro-in called)
 same => n,AudioFork(ws://localhost:8080/in,D(out))
 ```
 
-node.js server implementation
+Node.js server implementation
 
 ```
 const http = require('http');
@@ -164,13 +159,14 @@ server.listen(8080);
 
 # Live transcription demo
 
-for a demo integration with Google Cloud speech APIs, please see: [Asterisk Transcribe Demo](https://github.com/nadirhamid/audiofork-transcribe-demo)
+For a demo integration with Google Cloud speech APIs, please see: [Asterisk Transcribe Demo](https://github.com/nadirhamid/audiofork-transcribe-demo)
 
 # TLS support
 
-AudioFork() currently supports secure websocket connections. in order to create a secure websocket connection, you must specify the "T" option in the "AudioFork()" app options.
+AudioFork currently supports secure websocket connections. In order to create a secure websocket connection, you must add the "T" option to the app options.
 
-for example:
+For example:
+
 ```
 AudioFork(wss://example.org/in,D(out)T(on))
 ```
@@ -179,36 +175,31 @@ AudioFork(wss://example.org/in,D(out)T(on))
 
 It is also possible to setup basic backoff for reconnection. By default, Audiofork is configured to reconnect to the WS server, and after a preconfigured number of attempts it will close the connection. These parameters, however, can be adjusted.
 
-To adjust the reconnection parameters you can use the following parameters:
+To adjust the reconnection parameters, you can use the following parameters:
 
 ```
 R(timeout_for_connection)
 r(number of times to attempt reconnection)
 ```
 
-For instance, the following example will set the reconnection timeout to 10 seconds and attempt to reconnect five times.
+For instance, the following example will set the reconnection timeout to 10 seconds and will attempt to reconnect five times.
 
 ```
 AudioFork(wss://example.org/in,R(10)r(5))
 ```
 
+# Project roadmap
 
-# project roadmap
+At this time, AudioFork is largely incomplete and has many updates planned. 
 
-below is a list of updates planned for the module:
+The following updates are scheduled for the upcoming releases:
 
-- add asterisk manager support
-  - stopping live AudioForks thru AMI
-  - starting new AudioFork based on channel prefix
-  - applying volume gain to AudioFork
-  - muting AudioFork
-- store responses pushed from websocket server into channel var
+- Test and ensure module is fully compatible with Asterisk manager
+- Store any WebSocket responses in a dialplan variable
 
-# contact info
+# Contact info
 
-for any queries / more info please contact me directly:
+For any queries, please contact me directly:
 ```
 Nadir Hamid <matrix.nad@gmail.com>
 ```
-
-thank you

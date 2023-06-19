@@ -37,6 +37,11 @@
 	<support_level>core</support_level>
  ***/
 
+#ifndef AST_MODULE
+#define AST_MODULE "Audiofork"
+#endif
+
+
 #include "asterisk.h"
 
 #include "asterisk/paths.h"     /* use ast_config_AST_MONITOR_DIR */
@@ -62,6 +67,7 @@
 #include "asterisk/pbx.h"
 #include "asterisk/http_websocket.h"
 #include "asterisk/tcptls.h"
+
 
 /*** DOCUMENTATION
 	<application name="AudioFork" language="en_US">
