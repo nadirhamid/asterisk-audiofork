@@ -454,6 +454,8 @@ static void audiofork_free(struct audiofork *audiofork)
 		ast_free(audiofork->post_process);
 		ast_free(audiofork->wsserver);
 
+		ast_websocket_close(audiofork->websocket, 1011);
+
 		/* clean stringfields */
 		ast_string_field_free_memory(audiofork);
 
