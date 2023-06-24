@@ -443,7 +443,7 @@ static int start_audiofork(struct ast_channel *chan, struct ast_audiohook *audio
 
 static int audiofork_ws_close(struct audiofork *audiofork)
 {
-	ast_verb(2, "[AudioFork] Closing websocket connecion\n");
+	ast_verb(2, "[AudioFork] Closing websocket connection\n");
 	if (audiofork->websocket) {
 		ast_verb(2, "[AudioFork] Calling ast_websocket_close\n");
 		return ast_websocket_close(audiofork->websocket, 1011);
@@ -463,7 +463,7 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 	enum ast_websocket_result result;
 
 	if (audiofork->websocket) {
-		ast_verb(2, "<%s> [AudioFork] (%s) Reconnecting websocket server at: %s\n",
+		ast_verb(2, "<%s> [AudioFork] (%s) Reconnecting to websocket server at: %s\n",
 			ast_channel_name(audiofork->autochan->chan),
 			audiofork->direction_string,
 			audiofork->audiofork_ds->wsserver);
@@ -474,7 +474,7 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 		ao2_cleanup(audiofork->websocket);
 	}
 	else {
-		ast_verb(2, "<%s> [AudioFork] (%s) Connecting websocket server at: %s\n",
+		ast_verb(2, "<%s> [AudioFork] (%s) Connecting to websocket server at: %s\n",
 			ast_channel_name(audiofork->autochan->chan),
 			audiofork->direction_string,
 			audiofork->audiofork_ds->wsserver);
@@ -482,10 +482,10 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 
 	// Check if we're running with TLS
 	if (audiofork->has_tls == 1) {
-		ast_verb(2, "<%s> [AudioFork] (%s) Creating WS with TLS\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+		ast_verb(2, "<%s> [AudioFork] (%s) Creating to WebSocket server with TLS mode enabled\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 		audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg, &result);
 	} else {
-		ast_verb(2, "<%s> [AudioFork] (%s) Creating WS without TLS\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+		ast_verb(2, "<%s> [AudioFork] (%s) Creating to WebSocket server without TLS\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 		audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL, &result);
 	}
 
@@ -494,7 +494,7 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 
 /*
 	reconn_status
-	0 = oK
+	0 = OK
 	1 = FAILED
 */
 static int audiofork_start_reconnecting(struct audiofork *audiofork)
@@ -511,10 +511,9 @@ static int audiofork_start_reconnecting(struct audiofork *audiofork)
 	while (counter < attempts) {
 		now = (int)time(NULL);
 		delta = now - last_attempt;
-		//ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection delta %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_delta);
 
-		// small check to see if we should keep waiting on reconnection attempts...
-		// basically this checks if reconnection wasnt already initiated, or if it was, it ensures that the reconnection wait is still less than the max allowed timeout
+		// small check to see if we should keep waiting on the reconnection. This uses the
+		// reconnection_timeout variable configured in the dialplan
 		if (last_attempt != 0 && delta <= timeout) {
 			// keep waiting
 			continue;
@@ -529,7 +528,7 @@ static int audiofork_start_reconnecting(struct audiofork *audiofork)
 		}
 
 		// reconnection failed...
-		// update our counter for last reconnection attempt
+		// update our counter with the last reconnection attempt
 		last_attempt=(int)time(NULL);
 
 		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, timeout, (attempts-counter), now, last_attempt);
