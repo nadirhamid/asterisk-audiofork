@@ -298,6 +298,7 @@
 
  ***/
 
+#define SAMPLES_PER_FRAME 160
 #define get_volfactor(x) x ? ((x > 0) ? (1 << x) : ((1 << abs(x)) * -1)) : 0
 
 static const char *const app = "AudioFork";
@@ -324,11 +325,13 @@ struct audiofork {
 	struct audiofork_ds *audiofork_ds;
 
 	/* the below string fields describe data used for creating voicemails from the recording */
-	 AST_DECLARE_STRING_FIELDS(AST_STRING_FIELD(call_context);
-														 AST_STRING_FIELD(call_macrocontext);
-														 AST_STRING_FIELD(call_extension);
-														 AST_STRING_FIELD(call_callerchan);
-														 AST_STRING_FIELD(call_callerid););
+	 AST_DECLARE_STRING_FIELDS(
+		AST_STRING_FIELD(call_context);
+		AST_STRING_FIELD(call_macrocontext);
+		AST_STRING_FIELD(call_extension);
+		AST_STRING_FIELD(call_callerchan);
+		AST_STRING_FIELD(call_callerid);
+	);
 	int call_priority;
 	int has_tls;
 };
@@ -366,22 +369,20 @@ enum audiofork_args {
 };
 
 AST_APP_OPTIONS(audiofork_opts, {
-								AST_APP_OPTION('a', MUXFLAG_APPEND),
-								AST_APP_OPTION('b', MUXFLAG_BRIDGED),
-								AST_APP_OPTION_ARG('B', MUXFLAG_BEEP, OPT_ARG_BEEP_INTERVAL),
-								AST_APP_OPTION('p', MUXFLAG_BEEP_START),
-								AST_APP_OPTION('P', MUXFLAG_BEEP_STOP),
-								AST_APP_OPTION_ARG('v', MUXFLAG_READVOLUME, OPT_ARG_READVOLUME),
-								AST_APP_OPTION_ARG('V', MUXFLAG_WRITEVOLUME,
-																	 OPT_ARG_WRITEVOLUME), AST_APP_OPTION_ARG('W',
-																																						MUXFLAG_VOLUME,
-																																						OPT_ARG_VOLUME),
-								AST_APP_OPTION_ARG('i', MUXFLAG_UID, OPT_ARG_UID),
-								AST_APP_OPTION_ARG('S', MUXFLAG_RWSYNC, OPT_ARG_RWSYNC),
-								AST_APP_OPTION_ARG('D', MUXFLAG_DIRECTION, OPT_ARG_DIRECTION),
-								AST_APP_OPTION_ARG('T', MUXFLAG_TLS, OPT_ARG_TLS),
-								AST_APP_OPTION_ARG('R', MUXFLAG_RECONNECTION_TIMEOUT, OPT_ARG_RECONNECTION_TIMEOUT),
-								AST_APP_OPTION_ARG('r', MUXFLAG_RECONNECTION_ATTEMPTS, OPT_ARG_RECONNECTION_ATTEMPTS),
+	AST_APP_OPTION('a', MUXFLAG_APPEND),
+	AST_APP_OPTION('b', MUXFLAG_BRIDGED),
+	AST_APP_OPTION_ARG('B', MUXFLAG_BEEP, OPT_ARG_BEEP_INTERVAL),
+	AST_APP_OPTION('p', MUXFLAG_BEEP_START),
+	AST_APP_OPTION('P', MUXFLAG_BEEP_STOP),
+	AST_APP_OPTION_ARG('v', MUXFLAG_READVOLUME, OPT_ARG_READVOLUME),
+	AST_APP_OPTION_ARG('V', MUXFLAG_WRITEVOLUME, OPT_ARG_WRITEVOLUME), 
+	AST_APP_OPTION_ARG('W', MUXFLAG_VOLUME, OPT_ARG_VOLUME),
+	AST_APP_OPTION_ARG('i', MUXFLAG_UID, OPT_ARG_UID),
+	AST_APP_OPTION_ARG('S', MUXFLAG_RWSYNC, OPT_ARG_RWSYNC),
+	AST_APP_OPTION_ARG('D', MUXFLAG_DIRECTION, OPT_ARG_DIRECTION),
+	AST_APP_OPTION_ARG('T', MUXFLAG_TLS, OPT_ARG_TLS),
+	AST_APP_OPTION_ARG('R', MUXFLAG_RECONNECTION_TIMEOUT, OPT_ARG_RECONNECTION_TIMEOUT),
+	AST_APP_OPTION_ARG('r', MUXFLAG_RECONNECTION_ATTEMPTS, OPT_ARG_RECONNECTION_ATTEMPTS),
 });
 
 struct audiofork_ds {
@@ -431,8 +432,7 @@ static void destroy_monitor_audiohook(struct audiofork *audiofork)
 	ast_audiohook_destroy(&audiofork->audiohook);
 }
 
-static int start_audiofork(struct ast_channel *chan,
-													 struct ast_audiohook *audiohook)
+static int start_audiofork(struct ast_channel *chan, struct ast_audiohook *audiohook)
 {
 	if (!chan) {
 		return -1;
@@ -440,8 +440,6 @@ static int start_audiofork(struct ast_channel *chan,
 
 	return ast_audiohook_attach(chan, audiohook);
 }
-
-#define SAMPLES_PER_FRAME 160
 
 static void audiofork_free(struct audiofork *audiofork)
 {
@@ -473,30 +471,26 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 
 	if (audiofork->websocket) {
 		ast_verb(2, "<%s> [AudioFork] (%s) Reconnecting websocket server at: %s\n",
-					ast_channel_name(audiofork->autochan->chan),
-					audiofork->direction_string,
-					audiofork->audiofork_ds->wsserver);
+			ast_channel_name(audiofork->autochan->chan),
+			audiofork->direction_string,
+			audiofork->audiofork_ds->wsserver);
 
 		ao2_ref(audiofork->websocket, -1);
 	}
 	else {
 		ast_verb(2, "<%s> [AudioFork] (%s) Connecting websocket server at: %s\n",
-					ast_channel_name(audiofork->autochan->chan),
-					audiofork->direction_string,
-					audiofork->audiofork_ds->wsserver);
+			ast_channel_name(audiofork->autochan->chan),
+			audiofork->direction_string,
+			audiofork->audiofork_ds->wsserver);
 	}
 
 	// Check if we're running with TLS
 	if (audiofork->has_tls == 1) {
 		ast_verb(2, "<%s> [AudioFork] (%s) Creating WS with TLS\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		audiofork->websocket =
-			ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg,
-																	&result);
+		audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg, &result);
 	} else {
 		ast_verb(2, "<%s> [AudioFork] (%s) Creating WS without TLS\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		audiofork->websocket =
-			ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL,
-																	&result);
+		audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL, &result);
 	}
 
 	return result;
@@ -516,8 +510,6 @@ static void *audiofork_thread(void *obj)
 	int reconn_now;
 	int reconn_delta;
 
-
-
 	/* Keep callid association before any log messages */
 	if (audiofork->callid) {
 		ast_verb(2, "<%s> [AudioFork] (%s) Keeping Call-ID Association\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
@@ -526,11 +518,9 @@ static void *audiofork_thread(void *obj)
 
 	result = audiofork_ws_connect(audiofork);
 	if (result != WS_OK) {
-		ast_log(LOG_ERROR, "<%s> Could not connect to websocket server: %s\n",
-						ast_channel_name(audiofork->autochan->chan), audiofork->audiofork_ds->wsserver);
+		ast_log(LOG_ERROR, "<%s> Could not connect to websocket server: %s\n", ast_channel_name(audiofork->autochan->chan), audiofork->audiofork_ds->wsserver);
 
-		ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n",
-															audiofork->wsserver);
+		ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n", audiofork->wsserver);
 
 		/* kill the audiohook */
 		destroy_monitor_audiohook(audiofork);
@@ -548,8 +538,7 @@ static void *audiofork_thread(void *obj)
 	//fs = &audiofork->audiofork_ds->fs;
 
 	ast_mutex_lock(&audiofork->audiofork_ds->lock);
-	format_slin =
-		ast_format_cache_get_slin_by_rate(audiofork->audiofork_ds->samp_rate);
+	format_slin = ast_format_cache_get_slin_by_rate(audiofork->audiofork_ds->samp_rate);
 
 	ast_mutex_unlock(&audiofork->audiofork_ds->lock);
 
@@ -558,12 +547,9 @@ static void *audiofork_thread(void *obj)
 
 	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
 		// ast_verb(2, "<%s> [AudioFork] (%s) Reading Audio Hook frame...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		struct ast_frame *fr = NULL;
+		struct ast_frame *fr = ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME, audiofork->direction, format_slin);
 
-		if (!
-				(fr =
-				 ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME,
-																	audiofork->direction, format_slin))) {
+		if (!fr) {
 			ast_audiohook_trigger_wait(&audiofork->audiohook);
 
 			if (audiofork->audiohook.status != AST_AUDIOHOOK_STATUS_RUNNING) {
@@ -584,12 +570,9 @@ static void *audiofork_thread(void *obj)
 			// ast_verb(2, "<%s> sending audio frame to websocket...\n", ast_channel_name(audiofork->autochan->chan));
 			// ast_mutex_lock(&audiofork->audiofork_ds->lock);
 
-			if (ast_websocket_write
-					(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr,
-					 cur->datalen)) {
+			if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
 
-				ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnecting...\n",
-								ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+				ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnecting...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 
 				while ( reconn_counter < reconn_attempts ) {
 					reconn_now = (int)time(NULL);
@@ -621,6 +604,7 @@ static void *audiofork_thread(void *obj)
 					reconn_counter ++;
 					reconn_failed = 1;
 				}
+
 				if ( reconn_failed == 1 ) {
 					audiofork->websocket = NULL;
 					audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
@@ -628,10 +612,7 @@ static void *audiofork_thread(void *obj)
 				}
 
 				/* re-send the last frame */
-				if (ast_websocket_write
-						(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr,
-						 cur->datalen)) {
-
+				if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
 					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not re-write to websocket.  Complete Failure.\n",
 									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 
@@ -673,8 +654,7 @@ static void *audiofork_thread(void *obj)
 	/* Datastore cleanup.  close the filestream and wait for ds destruction */
 	ast_mutex_lock(&audiofork->audiofork_ds->lock);
 	if (!audiofork->audiofork_ds->destruction_ok) {
-		ast_cond_wait(&audiofork->audiofork_ds->destruction_condition,
-									&audiofork->audiofork_ds->lock);
+		ast_cond_wait(&audiofork->audiofork_ds->destruction_condition, &audiofork->audiofork_ds->lock);
 	}
 	ast_mutex_unlock(&audiofork->audiofork_ds->lock);
 
@@ -691,8 +671,7 @@ static void *audiofork_thread(void *obj)
 	// audiofork->name
 
 	ast_verb(2, "<%s> [AudioFork] (%s) End AudioFork Recording to: %s\n", channel_name_cleanup, audiofork->direction_string, audiofork->wsserver);
-	ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n",
-															audiofork->wsserver);
+	ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n", audiofork->wsserver);
 
 	audiofork_free(audiofork);
 
@@ -701,9 +680,7 @@ static void *audiofork_thread(void *obj)
 	return NULL;
 }
 
-static int setup_audiofork_ds(struct audiofork *audiofork,
-															struct ast_channel *chan, char **datastore_id,
-															const char *beep_id)
+static int setup_audiofork_ds(struct audiofork *audiofork, struct ast_channel *chan, char **datastore_id, const char *beep_id)
 {
 	struct ast_datastore *datastore = NULL;
 	struct audiofork_ds *audiofork_ds;
@@ -750,16 +727,18 @@ static int setup_audiofork_ds(struct audiofork *audiofork,
 	return 0;
 }
 
-static int launch_audiofork_thread(struct ast_channel *chan,
-																	 const char *wsserver, unsigned int flags,
-																	 enum ast_audiohook_direction direction,
-																	 char* tcert,
-																	 int reconn_timeout,
-																	 int reconn_attempts,
-																	 int readvol, int writevol,
-																	 const char *post_process,
-																	 const char *uid_channel_var,
-																	 const char *beep_id)
+static int launch_audiofork_thread(
+	struct ast_channel *chan,
+	const char *wsserver, unsigned int flags,
+	enum ast_audiohook_direction direction,
+	char* tcert,
+	int reconn_timeout,
+	int reconn_attempts,
+	int readvol, int writevol,
+	const char *post_process,
+	const char *uid_channel_var,
+	const char *beep_id
+)
 {
 	pthread_t thread;
 	struct audiofork *audiofork;
@@ -778,8 +757,7 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 			}
 		}
 		ast_channel_lock(chan);
-		pbx_substitute_variables_helper(chan, p1, postprocess2,
-																		sizeof(postprocess2) - 1);
+		pbx_substitute_variables_helper(chan, p1, postprocess2, sizeof(postprocess2) - 1);
 		ast_channel_unlock(chan);
 	}
 
@@ -795,8 +773,7 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 	}
 
 	/* Setup the actual spy before creating our thread */
-	if (ast_audiohook_init
-			(&audiofork->audiohook, AST_AUDIOHOOK_TYPE_SPY, audiofork_spy_type, 0)) {
+	if (ast_audiohook_init(&audiofork->audiohook, AST_AUDIOHOOK_TYPE_SPY, audiofork_spy_type, 0)) {
 		audiofork_free(audiofork);
 		return -1;
 	}
@@ -809,7 +786,6 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 	}
 
 	/* Direction */
-
 	audiofork->direction = direction;
 
 	if (direction == AST_AUDIOHOOK_DIRECTION_READ) {
@@ -822,9 +798,7 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 		audiofork->direction_string = "both";
 	}
 
-
 	ast_verb(2, "<%s> [AudioFork] (%s) Setting Direction\n", ast_channel_name(chan), audiofork->direction_string);
-
 
 	// TODO: make this configurable
 	audiofork->reconnection_attempts = reconn_attempts;
@@ -834,17 +808,13 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection attempts to %d\n", ast_channel_name(chan), audiofork->reconnection_attempts);
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection timeout to %d\n", ast_channel_name(chan), audiofork->reconnection_timeout);
 
-
-
 	/* Server */
-
 	if (!ast_strlen_zero(wsserver)) {
 		ast_verb(2, "<%s> [AudioFork] (%s) Setting wsserver: %s\n", ast_channel_name(chan), audiofork->direction_string, wsserver);
 		audiofork->wsserver = ast_strdup(wsserver);
 	}
 
 	/* TLS */
-
 	audiofork->has_tls = 0;
 	if (!ast_strlen_zero(tcert)) {
 		ast_verb(2, "<%s> [AudioFork] (%s) Setting TLS Cert: %s\n", ast_channel_name(chan), audiofork->direction_string, tcert);
@@ -862,14 +832,13 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 	}
 
 	ast_verb(2, "<%s> [AudioFork] (%s) Completed Setup\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-
 	if (!ast_strlen_zero(uid_channel_var)) {
 		if (datastore_id) {
 			pbx_builtin_setvar_helper(chan, uid_channel_var, datastore_id);
 		}
 	}
-	ast_free(datastore_id);
 
+	ast_free(datastore_id);
 	audiofork->name = ast_strdup(ast_channel_name(chan));
 
 	if (!ast_strlen_zero(postprocess2)) {
@@ -887,8 +856,7 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 		audiofork->audiohook.options.write_volume = writevol;
 
 	if (start_audiofork(chan, &audiofork->audiohook)) {
-		ast_log(LOG_WARNING, "<%s> (%s) [AudioFork] Unable to add spy type '%s'\n",
-						audiofork->direction_string, ast_channel_name(chan), audiofork_spy_type);
+		ast_log(LOG_WARNING, "<%s> (%s) [AudioFork] Unable to add spy type '%s'\n", audiofork->direction_string, ast_channel_name(chan), audiofork_spy_type);
 		ast_audiohook_destroy(&audiofork->audiohook);
 		audiofork_free(audiofork);
 		return -1;
@@ -899,8 +867,7 @@ static int launch_audiofork_thread(struct ast_channel *chan,
 	/* reference be released at audiofork destruction */
 	audiofork->callid = ast_read_threadstorage_callid();
 
-	return ast_pthread_create_detached_background(&thread, NULL, audiofork_thread,
-																								audiofork);
+	return ast_pthread_create_detached_background(&thread, NULL, audiofork_thread, audiofork);
 }
 
 static int audiofork_exec(struct ast_channel *chan, const char *data)
@@ -915,9 +882,11 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 	char *tcert = NULL;
 	int reconn_timeout = 5;
 	int reconn_attempts = 5;
-	AST_DECLARE_APP_ARGS(args,
-											 AST_APP_ARG(wsserver);
-											 AST_APP_ARG(options); AST_APP_ARG(post_process););
+	AST_DECLARE_APP_ARGS(args, 
+		AST_APP_ARG(wsserver);
+		AST_APP_ARG(options);
+		AST_APP_ARG(post_process);
+	);
 
 	if (ast_strlen_zero(data)) {
 		ast_log(LOG_WARNING, "AudioFork requires an argument wsserver\n");
@@ -935,13 +904,9 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
 		if (ast_test_flag(&flags, MUXFLAG_READVOLUME)) {
 			if (ast_strlen_zero(opts[OPT_ARG_READVOLUME])) {
-				ast_log(LOG_WARNING,
-								"No volume level was provided for the heard volume ('v') option.\n");
-			} else if ((sscanf(opts[OPT_ARG_READVOLUME], "%2d", &x) != 1) || (x < -4)
-								 || (x > 4)) {
-				ast_log(LOG_NOTICE,
-								"Heard volume must be a number between -4 and 4, not '%s'\n",
-								opts[OPT_ARG_READVOLUME]);
+				ast_log(LOG_WARNING, "No volume level was provided for the heard volume ('v') option.\n");
+			} else if ((sscanf(opts[OPT_ARG_READVOLUME], "%2d", &x) != 1) || (x < -4) || (x > 4)) {
+				ast_log(LOG_NOTICE, "Heard volume must be a number between -4 and 4, not '%s'\n", opts[OPT_ARG_READVOLUME]);
 			} else {
 				readvol = get_volfactor(x);
 			}
@@ -949,13 +914,9 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
 		if (ast_test_flag(&flags, MUXFLAG_WRITEVOLUME)) {
 			if (ast_strlen_zero(opts[OPT_ARG_WRITEVOLUME])) {
-				ast_log(LOG_WARNING,
-								"No volume level was provided for the spoken volume ('V') option.\n");
-			} else if ((sscanf(opts[OPT_ARG_WRITEVOLUME], "%2d", &x) != 1) || (x < -4)
-								 || (x > 4)) {
-				ast_log(LOG_NOTICE,
-								"Spoken volume must be a number between -4 and 4, not '%s'\n",
-								opts[OPT_ARG_WRITEVOLUME]);
+				ast_log(LOG_WARNING, "No volume level was provided for the spoken volume ('V') option.\n");
+			} else if ((sscanf(opts[OPT_ARG_WRITEVOLUME], "%2d", &x) != 1) || (x < -4) || (x > 4)) {
+				ast_log(LOG_NOTICE, "Spoken volume must be a number between -4 and 4, not '%s'\n", opts[OPT_ARG_WRITEVOLUME]);
 			} else {
 				writevol = get_volfactor(x);
 			}
@@ -963,13 +924,9 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
 		if (ast_test_flag(&flags, MUXFLAG_VOLUME)) {
 			if (ast_strlen_zero(opts[OPT_ARG_VOLUME])) {
-				ast_log(LOG_WARNING,
-								"No volume level was provided for the combined volume ('W') option.\n");
-			} else if ((sscanf(opts[OPT_ARG_VOLUME], "%2d", &x) != 1) || (x < -4)
-								 || (x > 4)) {
-				ast_log(LOG_NOTICE,
-								"Combined volume must be a number between -4 and 4, not '%s'\n",
-								opts[OPT_ARG_VOLUME]);
+				ast_log(LOG_WARNING, "No volume level was provided for the combined volume ('W') option.\n");
+			} else if ((sscanf(opts[OPT_ARG_VOLUME], "%2d", &x) != 1) || (x < -4) || (x > 4)) {
+				ast_log(LOG_NOTICE, "Combined volume must be a number between -4 and 4, not '%s'\n", opts[OPT_ARG_VOLUME]);
 			} else {
 				readvol = writevol = get_volfactor(x);
 			}
@@ -984,14 +941,11 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 			unsigned int interval = 15;
 
 			if (sscanf(interval_str, "%30u", &interval) != 1) {
-				ast_log(LOG_WARNING,
-								"Invalid interval '%s' for periodic beep. Using default of %u\n",
-								interval_str, interval);
+				ast_log(LOG_WARNING, "Invalid interval '%s' for periodic beep. Using default of %u\n", interval_str, interval);
 			}
 
 			if (ast_beep_start(chan, interval, beep_id, sizeof(beep_id))) {
-				ast_log(LOG_WARNING,
-								"Unable to enable periodic beep, please ensure func_periodic_hook is loaded.\n");
+				ast_log(LOG_WARNING, "Unable to enable periodic beep, please ensure func_periodic_hook is loaded.\n");
 				return -1;
 			}
 		}
@@ -1007,9 +961,7 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 			} else {
 				direction = AST_AUDIOHOOK_DIRECTION_BOTH;
 
-				ast_log(LOG_WARNING,
-								"Invalid direction '%s' given. Using default of 'both'\n",
-								opts[OPT_ARG_DIRECTION]);
+				ast_log(LOG_WARNING, "Invalid direction '%s' given. Using default of 'both'\n", opts[OPT_ARG_DIRECTION]);
 			}
 		}
 
@@ -1036,25 +988,25 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 		return -1;
 	}
 
-	/* If filename exists, try to create directories for it */
-	if (!(ast_strlen_zero(args.wsserver))) {
-	}
-
 	pbx_builtin_setvar_helper(chan, "AUDIOFORK_WSSERVER", args.wsserver);
 
 	/* If launch_monitor_thread works, the module reference must not be released until it is finished. */
 	ast_module_ref(ast_module_info->self);
 
-	if (launch_audiofork_thread(chan,
-															args.wsserver,
-															flags.flags,
-															direction,
-															tcert,
-															reconn_timeout,
-															reconn_attempts,
-															readvol,
-															writevol,
-															args.post_process, uid_channel_var, beep_id)) {
+	if (launch_audiofork_thread(
+		chan,
+		args.wsserver,
+		flags.flags,
+		direction,
+		tcert,
+		reconn_timeout,
+		reconn_attempts,
+		readvol,
+		writevol,
+		args.post_process, 
+		uid_channel_var, 
+		beep_id)
+	) {
 
 		/* Failed */
 		ast_module_unref(ast_module_info->self);
@@ -1080,8 +1032,7 @@ static int stop_audiofork_full(struct ast_channel *chan, const char *data)
 
 	ast_channel_lock(chan);
 
-	datastore = ast_channel_datastore_find(chan, &audiofork_ds_info,
-																				 S_OR(args.audioforkid, NULL));
+	datastore = ast_channel_datastore_find(chan, &audiofork_ds_info, S_OR(args.audioforkid, NULL));
 	if (!datastore) {
 		ast_channel_unlock(chan);
 		return -1;
@@ -1095,8 +1046,7 @@ static int stop_audiofork_full(struct ast_channel *chan, const char *data)
 	 * destruction, poke the audiohook trigger. */
 	if (audiofork_ds->audiohook) {
 		if (audiofork_ds->audiohook->status != AST_AUDIOHOOK_STATUS_DONE) {
-			ast_audiohook_update_status(audiofork_ds->audiohook,
-																	AST_AUDIOHOOK_STATUS_SHUTDOWN);
+			ast_audiohook_update_status(audiofork_ds->audiohook, AST_AUDIOHOOK_STATUS_SHUTDOWN);
 		}
 		ast_audiohook_lock(audiofork_ds->audiohook);
 		ast_cond_signal(&audiofork_ds->audiohook->trigger);
@@ -1130,8 +1080,7 @@ static int stop_audiofork_exec(struct ast_channel *chan, const char *data)
 	return 0;
 }
 
-static char *handle_cli_audiofork(struct ast_cli_entry *e, int cmd,
-																	struct ast_cli_args *a)
+static char *handle_cli_audiofork(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct ast_channel *chan;
 	struct ast_datastore *datastore = NULL;
@@ -1207,8 +1156,7 @@ static int manager_mute_audiofork(struct mansession *s, const struct message *m)
 	enum ast_audiohook_flags flag;
 
 	if (ast_strlen_zero(direction)) {
-		astman_send_error(s, m,
-											"No direction specified. Must be read, write or both");
+		astman_send_error(s, m, "No direction specified. Must be read, write or both");
 		return AMI_SUCCESS;
 	}
 
@@ -1219,8 +1167,7 @@ static int manager_mute_audiofork(struct mansession *s, const struct message *m)
 	} else if (!strcasecmp(direction, "both")) {
 		flag = AST_AUDIOHOOK_MUTE_READ | AST_AUDIOHOOK_MUTE_WRITE;
 	} else {
-		astman_send_error(s, m,
-											"Invalid direction specified. Must be read, write or both");
+		astman_send_error(s, m, "Invalid direction specified. Must be read, write or both");
 		return AMI_SUCCESS;
 	}
 
@@ -1365,8 +1312,7 @@ static int manager_stop_audiofork(struct mansession *s, const struct message *m)
 	return AMI_SUCCESS;
 }
 
-static int func_audiofork_read(struct ast_channel *chan, const char *cmd,
-															 char *data, char *buf, size_t len)
+static int func_audiofork_read(struct ast_channel *chan, const char *cmd, char *data, char *buf, size_t len)
 {
 	struct ast_datastore *datastore;
 	struct audiofork_ds *ds_data;
@@ -1375,8 +1321,7 @@ static int func_audiofork_read(struct ast_channel *chan, const char *cmd,
 	AST_STANDARD_APP_ARGS(args, data);
 
 	if (ast_strlen_zero(args.id) || ast_strlen_zero(args.key)) {
-		ast_log(LOG_WARNING, "Not enough arguments provided to %s. "
-						"An ID and key must be provided\n", cmd);
+		ast_log(LOG_WARNING, "Not enough arguments provided to %s. An ID and key must be provided\n", cmd);
 		return -1;
 	}
 
@@ -1442,23 +1387,21 @@ static int load_module(void)
 	ast_cli_register_multiple(cli_audiofork, ARRAY_LEN(cli_audiofork));
 	res = ast_register_application_xml(app, audiofork_exec);
 	res |= ast_register_application_xml(stop_app, stop_audiofork_exec);
-	res |=
-		ast_manager_register_xml("AudioForkMute",
-														 EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL,
-														 manager_mute_audiofork);
-	res |=
-		ast_manager_register_xml("AudioFork", EVENT_FLAG_SYSTEM, manager_audiofork);
-	res |=
-		ast_manager_register_xml("StopAudioFork",
-														 EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL,
-														 manager_stop_audiofork);
+	res |= ast_manager_register_xml("AudioForkMute", EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_mute_audiofork);
+	res |= ast_manager_register_xml("AudioFork", EVENT_FLAG_SYSTEM, manager_audiofork);
+	res |= ast_manager_register_xml("StopAudioFork", EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_stop_audiofork);
 	res |= ast_custom_function_register(&audiofork_function);
 	res |= set_audiofork_methods();
 
 	return res;
 }
 
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT,
-								"Audio Forking application",.support_level =
-								AST_MODULE_SUPPORT_CORE,.load = load_module,.unload =
-								unload_module,.optional_modules = "func_periodic_hook",);
+AST_MODULE_INFO(
+	ASTERISK_GPL_KEY, 
+	AST_MODFLAG_DEFAULT,
+	"Audio Forking application",
+	.support_level = AST_MODULE_SUPPORT_CORE,
+	.load = load_module,
+	.unload = unload_module,
+	.optional_modules = "func_periodic_hook",
+);
