@@ -314,7 +314,7 @@ struct audiofork {
 	struct ast_tls_config *tls_cfg;
 	char *tcert;
 	enum ast_audiohook_direction direction;
-	const char *direction_string;
+	char *direction_string;
 	int reconnection_attempts;
 	int reconnection_timeout;
 	char *post_process;
@@ -443,12 +443,13 @@ static int start_audiofork(struct ast_channel *chan, struct ast_audiohook *audio
 
 static int audiofork_ws_close(struct audiofork *audiofork)
 {
-	ast_verb(2, "<%s> [AudioFork] (%s) Closing websocket connecion\n", ast_channel_name(audiofork->autochan->chan), audiofork->wsserver);
+	ast_verb(2, "[AudioFork] Closing websocket connecion\n");
 	if (audiofork->websocket) {
-		ast_verb(2, "<%s> [AudioFork] (%s) Calling ast_websocket_close\n", ast_channel_name(audiofork->autochan->chan), audiofork->wsserver);
+		ast_verb(2, "[AudioFork] Calling ast_websocket_close\n");
 		return ast_websocket_close(audiofork->websocket, 1011);
 	}
-	ast_verb(2, "<%s> [AudioFork] (%s) No reference to websocket, can't close connection\n", ast_channel_name(audiofork->autochan->chan), audiofork->wsserver);
+
+	ast_verb(2, "[AudioFork] No reference to websocket, can't close connection\n");
 	return -1;
 }
 
@@ -552,6 +553,7 @@ static void audiofork_free(struct audiofork *audiofork)
 		ast_free(audiofork->name);
 		ast_free(audiofork->post_process);
 		ast_free(audiofork->wsserver);
+		ast_free(audiofork->direction_string);
 
 		audiofork_ws_close(audiofork);
 		ao2_cleanup(audiofork->websocket);
