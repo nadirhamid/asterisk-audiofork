@@ -477,6 +477,9 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 			audiofork->direction_string,
 			audiofork->audiofork_ds->wsserver);
 
+		// close the websocket connection before reconnecting
+		ast_websocket_close(audiofork->websocket, 1011);
+
 		ao2_ref(audiofork->websocket, -1);
 	}
 	else {
