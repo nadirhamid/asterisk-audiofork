@@ -452,6 +452,7 @@ static int audiofork_ws_close(struct audiofork *audiofork)
 	return -1;
 }
 
+
 /*
 	1 = success
 	0 = fail
@@ -490,6 +491,55 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 	return result;
 }
 
+/*
+	reconn_status
+	0 = oK
+	1 = FAILED
+*/
+static int audiofork_start_reconnecting(struct audiofork *audiofork)
+{
+	int counter= 0;
+	int status = 0;
+	int timeout = audiofork->reconnection_timeout;
+	int attempts = audiofork->reconnection_attempts;
+	int last_attempt = 0;
+	int now;
+	int delta;
+	int result;
+
+	while (counter < attempts) {
+		now = (int)time(NULL);
+		delta = now - last_attempt;
+		//ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection delta %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_delta);
+
+		// small check to see if we should keep waiting on reconnection attempts...
+		// basically this checks if reconnection wasnt already initiated, or if it was, it ensures that the reconnection wait is still less than the max allowed timeout
+		if (last_attempt != 0 && delta <= timeout) {
+			// keep waiting
+			continue;
+		}
+
+		// try to reconnect
+		result = audiofork_ws_connect(audiofork);
+		if (result == WS_OK) {
+			status = 0;
+			last_attempt = 0;
+			break;
+		}
+
+		// reconnection failed...
+		// update our counter for last reconnection attempt
+		last_attempt=(int)time(NULL);
+
+		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, timeout, (attempts-counter), now, last_attempt);
+
+		counter ++;
+		status = 1;
+	}
+
+	return status;
+}
+
 static void audiofork_free(struct audiofork *audiofork)
 {
 	if (audiofork) {
@@ -521,13 +571,7 @@ static void *audiofork_thread(void *obj)
 	struct ast_format *format_slin;
 	char *channel_name_cleanup;
 	enum ast_websocket_result result;
-	int reconn_counter= 0;
-	int reconn_failed = 0;
-	int reconn_timeout = audiofork->reconnection_timeout;
-	int reconn_attempts = audiofork->reconnection_attempts;
-	int reconn_last_attempt = 0;
-	int reconn_now;
-	int reconn_delta;
+	int reconn_status;
 
 	/* Keep callid association before any log messages */
 	if (audiofork->callid) {
@@ -592,38 +636,9 @@ static void *audiofork_thread(void *obj)
 			if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
 
 				ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnecting...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+				reconn_status = audiofork_start_reconnecting(audiofork);
 
-				while ( reconn_counter < reconn_attempts ) {
-					reconn_now = (int)time(NULL);
-					reconn_delta = reconn_now - reconn_last_attempt;
-					//ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection delta %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_delta);
-
-					// small check to see if we should keep waiting on reconnection attempts...
-					// basically this checks if reconnection wasnt already initiated, or if it was, it ensures that the reconnection wait is still less than the max allowed timeout
-					if ( reconn_last_attempt != 0 && reconn_delta <=  reconn_timeout ) {
-						// keep waiting
-						continue;
-					}
-
-					// try to reconnect
-					result = audiofork_ws_connect(audiofork);
-					if (result == WS_OK) {
-						reconn_failed = 0;
-						reconn_last_attempt = 0;
-						break;
-					}
-
-					// reconnection failed...
-					// update our counter for last reconnection attempt
-					reconn_last_attempt=(int)time(NULL);
-
-					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout, (reconn_attempts-reconn_counter), reconn_now, reconn_last_attempt);
-
-					reconn_counter ++;
-					reconn_failed = 1;
-				}
-
-				if ( reconn_failed == 1 ) {
+				if (reconn_status == 1) {
 					audiofork->websocket = NULL;
 					audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
 					break;
