@@ -571,6 +571,7 @@ static void *audiofork_thread(void *obj)
 	struct ast_format *format_slin;
 	char *channel_name_cleanup;
 	enum ast_websocket_result result;
+	int frames_sent = 0;
 	int reconn_status;
 
 	/* Keep callid association before any log messages */
@@ -652,6 +653,8 @@ static void *audiofork_thread(void *obj)
 					break;
 				}
 			}
+
+			frames_sent++;
 		}
 
 		//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
@@ -689,6 +692,7 @@ static void *audiofork_thread(void *obj)
 	/* kill the audiohook */
 	destroy_monitor_audiohook(audiofork);
 
+	ast_verb(2, "<%s> [AudioFork] (%s) Finished processing audiohook. Frames sent = %d\n", channel_name_cleanup, audiofork->direction_string, frames_sent);
 	ast_verb(2, "<%s> [AudioFork] (%s) Post Process\n", channel_name_cleanup, audiofork->direction_string);
 
 	if (audiofork->post_process) {
