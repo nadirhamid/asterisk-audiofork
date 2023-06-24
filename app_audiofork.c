@@ -441,26 +441,15 @@ static int start_audiofork(struct ast_channel *chan, struct ast_audiohook *audio
 	return ast_audiohook_attach(chan, audiohook);
 }
 
-static void audiofork_free(struct audiofork *audiofork)
+static int audiofork_ws_close(struct audiofork *audiofork)
 {
-	if (audiofork) {
-		if (audiofork->audiofork_ds) {
-			ast_mutex_destroy(&audiofork->audiofork_ds->lock);
-			ast_cond_destroy(&audiofork->audiofork_ds->destruction_condition);
-			ast_free(audiofork->audiofork_ds);
-		}
-
-		ast_free(audiofork->name);
-		ast_free(audiofork->post_process);
-		ast_free(audiofork->wsserver);
-
-		ast_websocket_close(audiofork->websocket, 1011);
-
-		/* clean stringfields */
-		ast_string_field_free_memory(audiofork);
-
-		ast_free(audiofork);
+	ast_verb(2, "<%s> [AudioFork] (%s) Closing websocket connecion\n", ast_channel_name(audiofork->autochan->chan), audiofork->wsserver);
+	if (audiofork->websocket) {
+		ast_verb(2, "<%s> [AudioFork] (%s) Calling ast_websocket_close\n", ast_channel_name(audiofork->autochan->chan), audiofork->wsserver);
+		return ast_websocket_close(audiofork->websocket, 1011);
 	}
+	ast_verb(2, "<%s> [AudioFork] (%s) No reference to websocket, can't close connection\n", ast_channel_name(audiofork->autochan->chan), audiofork->wsserver);
+	return -1;
 }
 
 /*
@@ -478,9 +467,9 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 			audiofork->audiofork_ds->wsserver);
 
 		// close the websocket connection before reconnecting
-		ast_websocket_close(audiofork->websocket, 1011);
+		audiofork_ws_close(audiofork);
 
-		ao2_ref(audiofork->websocket, -1);
+		ao2_cleanup(audiofork->websocket);
 	}
 	else {
 		ast_verb(2, "<%s> [AudioFork] (%s) Connecting websocket server at: %s\n",
@@ -500,6 +489,31 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 
 	return result;
 }
+
+static void audiofork_free(struct audiofork *audiofork)
+{
+	if (audiofork) {
+		if (audiofork->audiofork_ds) {
+			ast_mutex_destroy(&audiofork->audiofork_ds->lock);
+			ast_cond_destroy(&audiofork->audiofork_ds->destruction_condition);
+			ast_free(audiofork->audiofork_ds);
+		}
+
+		ast_free(audiofork->name);
+		ast_free(audiofork->post_process);
+		ast_free(audiofork->wsserver);
+
+		audiofork_ws_close(audiofork);
+		ao2_cleanup(audiofork->websocket);
+
+		/* clean stringfields */
+		ast_string_field_free_memory(audiofork);
+
+		ast_free(audiofork);
+	}
+}
+
+
 
 static void *audiofork_thread(void *obj)
 {
@@ -603,8 +617,7 @@ static void *audiofork_thread(void *obj)
 					// update our counter for last reconnection attempt
 					reconn_last_attempt=(int)time(NULL);
 
-					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n",
-									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout, (reconn_attempts-reconn_counter), reconn_now, reconn_last_attempt );
+					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, reconn_timeout, (reconn_attempts-reconn_counter), reconn_now, reconn_last_attempt);
 
 					reconn_counter ++;
 					reconn_failed = 1;
@@ -618,8 +631,7 @@ static void *audiofork_thread(void *obj)
 
 				/* re-send the last frame */
 				if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
-					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not re-write to websocket.  Complete Failure.\n",
-									ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not re-write to websocket.  Complete Failure.\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 
 					audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
 					break;
@@ -648,10 +660,6 @@ static void *audiofork_thread(void *obj)
 		ast_autochan_channel_unlock(audiofork->autochan);
 	}
 
-	if (audiofork->websocket) {
-		ao2_ref(audiofork->websocket, -1);
-	}
-
 	channel_name_cleanup = ast_strdupa(ast_channel_name(audiofork->autochan->chan));
 
 	ast_autochan_destroy(audiofork->autochan);
@@ -678,6 +686,7 @@ static void *audiofork_thread(void *obj)
 	ast_verb(2, "<%s> [AudioFork] (%s) End AudioFork Recording to: %s\n", channel_name_cleanup, audiofork->direction_string, audiofork->wsserver);
 	ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n", audiofork->wsserver);
 
+	/* free any audiofork memory */
 	audiofork_free(audiofork);
 
 	ast_module_unref(ast_module_info->self);
