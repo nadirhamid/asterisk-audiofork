@@ -314,7 +314,7 @@ struct audiofork {
 	struct ast_tls_config *tls_cfg;
 	char *tcert;
 	enum ast_audiohook_direction direction;
-	char *direction_string;
+	const char *direction_string;
 	int reconnection_attempts;
 	int reconnection_timeout;
 	char *post_process;
@@ -552,7 +552,6 @@ static void audiofork_free(struct audiofork *audiofork)
 		ast_free(audiofork->name);
 		ast_free(audiofork->post_process);
 		ast_free(audiofork->wsserver);
-		ast_free(audiofork->direction_string);
 
 		audiofork_ws_close(audiofork);
 		ao2_cleanup(audiofork->websocket);
