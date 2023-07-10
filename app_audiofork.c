@@ -584,7 +584,7 @@ static void *audiofork_thread(void *obj)
 	if (result != WS_OK) {
 		ast_log(LOG_ERROR, "<%s> Could not connect to websocket server: %s\n", ast_channel_name(audiofork->autochan->chan), audiofork->audiofork_ds->wsserver);
 
-		ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n", audiofork->wsserver);
+		ast_test_suite_event_notify("AUDIOFORK_END", "Ws server: %s\r\n", audiofork->wsserver);
 
 		/* kill the audiohook */
 		destroy_monitor_audiohook(audiofork);
@@ -703,7 +703,7 @@ static void *audiofork_thread(void *obj)
 	// audiofork->name
 
 	ast_verb(2, "<%s> [AudioFork] (%s) End AudioFork Recording to: %s\n", channel_name_cleanup, audiofork->direction_string, audiofork->wsserver);
-	ast_test_suite_event_notify("AUDIOFORK_END", "File: %s\r\n", audiofork->wsserver);
+	ast_test_suite_event_notify("AUDIOFORK_END", "Ws server: %s\r\n", audiofork->wsserver);
 
 	/* free any audiofork memory */
 	audiofork_free(audiofork);
@@ -921,6 +921,7 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 		AST_APP_ARG(post_process);
 	);
 
+	ast_log(LOG_NOTICE, "AudioFork created with args %s\n", data);
 	if (ast_strlen_zero(data)) {
 		ast_log(LOG_WARNING, "AudioFork requires an argument wsserver\n");
 		return -1;
@@ -1148,7 +1149,7 @@ static char *handle_cli_audiofork(struct ast_cli_entry *e, int cmd, struct ast_c
 	} else if (!strcasecmp(a->argv[1], "stop")) {
 		stop_audiofork_exec(chan, (a->argc >= 4) ? a->argv[3] : "");
 	} else if (!strcasecmp(a->argv[1], "list")) {
-		ast_cli(a->fd, "AudioFork ID\tFile\tReceive File\tTransmit File\n");
+		ast_cli(a->fd, "AudioFork ID\tWs Server\tReceive File\tTransmit File\n");
 		ast_cli(a->fd,
 						"=========================================================================\n");
 		ast_channel_lock(chan);
@@ -1246,9 +1247,9 @@ static int manager_audiofork(struct mansession *s, const struct message *m)
 	struct ast_channel *c;
 	const char *name = astman_get_header(m, "Channel");
 	const char *id = astman_get_header(m, "ActionID");
-	const char *file = astman_get_header(m, "File");
+	const char *wsserver = astman_get_header(m, "WsServer");
 	const char *options = astman_get_header(m, "Options");
-	const char *command = astman_get_header(m, "Command");
+	//const char *command = astman_get_header(m, "Command");
 	char *opts[OPT_ARG_ARRAY_SIZE] = { NULL, };
 	struct ast_flags flags = { 0 };
 	char *uid_channel_var = NULL;
@@ -1271,7 +1272,7 @@ static int manager_audiofork(struct mansession *s, const struct message *m)
 		ast_app_parse_options(audiofork_opts, &flags, opts, ast_strdupa(options));
 	}
 
-	snprintf(args, sizeof(args), "%s,%s,%s", file, options, command);
+	snprintf(args, sizeof(args), "%s,%s", wsserver, options);
 
 	res = audiofork_exec(c, args);
 
