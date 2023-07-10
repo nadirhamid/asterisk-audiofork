@@ -189,7 +189,7 @@ For instance, the following example will set the reconnection timeout to 10 seco
 AudioFork(wss://example.org/in,R(10)r(5))
 ```
 
-# Start a audio stream on demand
+# Start an audio stream on demand
 
 It is possible to start an audio stream for a live call. We can do this by using AMI (asterisk manager interface). 
 
