@@ -189,6 +189,35 @@ For instance, the following example will set the reconnection timeout to 10 seco
 AudioFork(wss://example.org/in,R(10)r(5))
 ```
 
+# Start a audio stream on demand
+
+It is possible to start an audio stream for a live call. We can do this by using AMI (asterisk manager interface). 
+
+In essence, we can start start streaming audio for any active channel.
+
+For a full example you can refer to the following NodeJS reference code. It uses the [NodeJS-AsteriskManager](https://github.com/pipobscure/NodeJS-AsteriskManager) library
+
+## Example: connect to AMI and call Audiofork
+
+```
+var ami = new require('asterisk-manager')('port','host','username','password', true);
+ami.keepConnected();
+ami.action({
+  'action':' 'AudioFork',
+  'channel':'PJSIP/myphone',
+  'ActionID': '1234',
+  'WsServer': 'ws://your_ws_server_url',
+  'Options': 'D(both)',
+  'Command': 'StartAudioFork'
+}, function(err, res) {
+  if (err) {
+    console.error( err )
+    return;
+  }
+  console.log(res)
+});
+```
+
 # Project roadmap
 
 At this time, AudioFork is largely incomplete and has many updates planned. 
