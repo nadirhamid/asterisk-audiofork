@@ -67,7 +67,8 @@
 #include "asterisk/pbx.h"
 #include "asterisk/http_websocket.h"
 #include "asterisk/tcptls.h"
-
+#include <stdio.h>
+#include <stdlib.h>
 
 /*** DOCUMENTATION
 	<application name="AudioFork" language="en_US">
@@ -540,6 +541,101 @@ static int audiofork_start_reconnecting(struct audiofork *audiofork)
 	return status;
 }
 
+static int read_websocket_msgs(struct ast_websocket *ws, char **buf)
+{
+	// read any websocket messages
+	char *payload;
+	uint64_t payload_len;
+	enum ast_websocket_opcode opcode;
+	int fragmented = 1;
+
+	while (fragmented) {
+		if (ast_websocket_read(ws, &payload, &payload_len,
+				       &opcode, &fragmented)) {
+			ast_log(LOG_ERROR, "Client WebSocket string read - "
+				"error reading string data\n");
+			return -1;
+		}
+
+		if (opcode == AST_WEBSOCKET_OPCODE_PING) {
+			/* Try read again, we have sent pong already */
+			fragmented = 1;
+			continue;
+		}
+
+		if (opcode == AST_WEBSOCKET_OPCODE_CONTINUATION) {
+			continue;
+		}
+
+		if (opcode == AST_WEBSOCKET_OPCODE_CLOSE) {
+			return -1;
+		}
+
+		if (opcode != AST_WEBSOCKET_OPCODE_BINARY) {
+			ast_log(LOG_ERROR, "Client WebSocket string read - "
+				"non string data received\n");
+			return -1;
+		}
+	}
+
+	if (!(*buf = ast_strndup(payload, payload_len))) {
+		return -1;
+	}
+
+	//return payload_len + 1;
+	return payload_len;
+}
+
+
+static int send_audio_to_chan(struct audiofork *audiofork, char *payload, uint64_t payload_len)
+{
+	struct ast_frame f = {
+		.frametype = AST_FRAME_VOICE,
+		.subclass.format = ast_format_slin,
+		.src = "AudioFork",
+		.mallocd = AST_MALLOCD_DATA,
+	};
+
+
+	uint8_t *data;
+
+	/*
+	uint8_t kind;
+	uint8_t len_high;
+	uint8_t len_low;
+	uint16_t len = 0;
+	uint8_t *data;
+	uint8_t retry = 3;
+	*/
+	ast_verb(2, "data buffer = %s\n", payload);
+	data = ast_malloc(payload_len);
+	if (!data) {
+		ast_log(LOG_ERROR, "Failed to allocate for data from AudioSocket\n");
+		return NULL;
+	}
+
+	memcpy( data, payload, payload_len );
+	/*
+	f.data.ptr = payload;
+	f.datalen = payload_len;
+	f.samples = payload_len / 2;
+	*/
+	f.data.ptr = data;
+	f.datalen = payload_len;
+	f.samples = payload_len / 2;
+
+	const char* chan_name = ast_channel_name( audiofork->autochan->chan );
+
+	if (ast_write(audiofork->autochan->chan, &f)) {
+		ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
+		ast_frfree(&f);
+		return -1;
+	}
+
+	return 0;
+}
+
+
 static void audiofork_free(struct audiofork *audiofork)
 {
 	if (audiofork) {
@@ -608,6 +704,21 @@ static void *audiofork_thread(void *obj)
 
 	/* The audiohook must enter and exit the loop locked */
 	ast_audiohook_lock(&audiofork->audiohook);
+
+	ast_stopstream(audiofork->autochan->chan);
+	int res = ast_streamfile(chan, front, ast_channel_language(chan));
+
+	while (1) {
+		char* buf;
+		ast_mutex_lock(&audiofork->audiofork_ds->lock);
+		uint64_t payload_len = read_websocket_msgs(audiofork->websocket, &buf);
+		if (payload_len == -1) {
+			return -1;
+		}
+		ast_verb(4, "received data len = %ju\n", payload_len);
+		//int res = send_audio_to_chan(audiofork, buf, payload_len);
+		ast_mutex_unlock(&audiofork->audiofork_ds->lock);
+	}
 
 	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
 		// ast_verb(2, "<%s> [AudioFork] (%s) Reading Audio Hook frame...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
@@ -1026,6 +1137,40 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 
 	/* If launch_monitor_thread works, the module reference must not be released until it is finished. */
 	ast_module_ref(ast_module_info->self);
+
+
+	//struct ast_format *format_slin;
+	struct ast_format *readFormat, *writeFormat;
+	char* chan_name = ast_channel_name(chan);
+
+	writeFormat = ao2_bump(ast_channel_writeformat(chan));
+	readFormat = ao2_bump(ast_channel_readformat(chan));
+
+
+	// setup audio formats correctly
+
+	/*
+	if (ast_set_write_format(chan, ast_format_slin)) {
+		ast_log(LOG_ERROR, "Failed to set write format to SLINEAR for channel %s\n", chan_name);
+		ao2_ref(writeFormat, -1);
+		ao2_ref(readFormat, -1);
+		return -1;
+	}
+	if (ast_set_read_format(chan, ast_format_slin)) {
+		ast_log(LOG_ERROR, "Failed to set read format to SLINEAR for channel %s\n", chan_name);
+
+		// Attempt to restore previous write format even though it is likely to
+		// fail, since setting the read format did.
+		if (ast_set_write_format(chan, writeFormat)) {
+			ast_log(LOG_ERROR, "Failed to restore write format for channel %s\n", chan_name);
+		}
+		ao2_ref(writeFormat, -1);
+		ao2_ref(readFormat, -1);
+		return -1;
+	}
+	*/
+
+
 
 	if (launch_audiofork_thread(
 		chan,
