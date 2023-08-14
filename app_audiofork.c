@@ -443,10 +443,12 @@ static int start_audiofork(struct ast_channel *chan, struct ast_audiohook *audio
 
 static int audiofork_ws_close(struct audiofork *audiofork)
 {
+	int ret;
 	ast_verb(2, "[AudioFork] Closing websocket connection\n");
 	if (audiofork->websocket) {
 		ast_verb(2, "[AudioFork] Calling ast_websocket_close\n");
-		return ast_websocket_close(audiofork->websocket, 1011);
+		ret = ast_websocket_close(audiofork->websocket, 1011);
+		return ret;
 	}
 
 	ast_verb(2, "[AudioFork] No reference to websocket, can't close connection\n");
@@ -554,7 +556,6 @@ static void audiofork_free(struct audiofork *audiofork)
 		ast_free(audiofork->wsserver);
 
 		audiofork_ws_close(audiofork);
-		ao2_cleanup(audiofork->websocket);
 
 		/* clean stringfields */
 		ast_string_field_free_memory(audiofork);
