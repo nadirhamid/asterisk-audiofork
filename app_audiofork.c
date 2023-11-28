@@ -763,6 +763,37 @@ static void *audiofork_thread(void *obj)
 			}
 
 			frames_sent++;
+
+			// write data if needed
+			char* buf;
+			uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
+			//ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
+			// Calculate size for output buffer (considering padding)
+			int output_size = (strlen(buf) * 3) / 4;
+			unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
+			
+			int decoded_length = decode_base64(buf, decoded_data);
+
+			struct ast_frame f = {
+				.frametype = AST_FRAME_VOICE,
+				.subclass.format = ast_format_slin,
+				.src = "AudioFork",
+				.mallocd = AST_MALLOCD_DATA,
+			};
+			f.data.ptr = decoded_data;
+			f.datalen = output_size;
+			f.samples = output_size / 2;
+			//int isoc_res = ast_frisolate(&f);
+			/*
+			if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, f.data.ptr, f.datalen)) {
+			}
+			*/
+			if (ast_write(audiofork->autochan->chan, &f)) {
+				ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
+			}
+
+			//ast_free(decoded_data);
+			ast_frfree(&f);
 		}
 
 		//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
@@ -775,36 +806,6 @@ static void *audiofork_thread(void *obj)
 
 		fr = NULL;
 
-		// write data if needed
-		char* buf;
-		uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
-		//ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
-		// Calculate size for output buffer (considering padding)
-		int output_size = (strlen(buf) * 3) / 4;
-		unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
-		
-		int decoded_length = decode_base64(buf, decoded_data);
-
-		struct ast_frame f = {
-			.frametype = AST_FRAME_VOICE,
-			.subclass.format = ast_format_slin,
-			.src = "AudioFork",
-			.mallocd = AST_MALLOCD_DATA,
-		};
-		f.data.ptr = decoded_data;
-		f.datalen = output_size;
-		f.samples = output_size / 2;
-		//int isoc_res = ast_frisolate(&f);
-		/*
-		if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, f.data.ptr, f.datalen)) {
-		}
-		*/
-		if (ast_write(audiofork->autochan->chan, &f)) {
-			ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
-		}
-
-		//ast_free(decoded_data);
-		ast_frfree(&f);
 		//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
 
 		ast_audiohook_lock(&audiofork->audiohook);
