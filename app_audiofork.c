@@ -670,7 +670,44 @@ static void audiofork_free(struct audiofork *audiofork)
 	}
 }
 
+static void *audiofork_send_thread(void *obj)
+{
+	struct audiofork *audiofork = obj;
+	const char* chan_name = ast_channel_name( audiofork->autochan->chan );
 
+	// write data if needed
+	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
+		char* buf;
+		uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
+		//ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
+		// Calculate size for output buffer (considering padding)
+		int output_size = (strlen(buf) * 3) / 4;
+		unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
+		
+		int decoded_length = decode_base64(buf, decoded_data);
+
+		struct ast_frame f = {
+			.frametype = AST_FRAME_VOICE,
+			.subclass.format = ast_format_slin,
+			.src = "AudioFork",
+			.mallocd = AST_MALLOCD_DATA,
+		};
+		f.data.ptr = decoded_data;
+		f.datalen = output_size;
+		f.samples = output_size / 2;
+		//int isoc_res = ast_frisolate(&f);
+		/*
+		if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, f.data.ptr, f.datalen)) {
+		}
+		*/
+		if (ast_write(audiofork->autochan->chan, &f)) {
+			ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
+		}
+
+		//ast_free(decoded_data);
+		ast_frfree(&f);
+	}
+}
 
 static void *audiofork_thread(void *obj)
 {
@@ -716,6 +753,11 @@ static void *audiofork_thread(void *obj)
 	int min_len = 320;
 	int len_to_copy = min_len;
 	const char* chan_name = ast_channel_name( audiofork->autochan->chan );
+
+	pthread_t send_pthread;
+	audiofork->callid = ast_read_threadstorage_callid();
+
+	ast_pthread_create_detached_background(&send_pthread, NULL, audiofork_send_thread, audiofork);
 
 	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
 		// ast_verb(2, "<%s> [AudioFork] (%s) Reading Audio Hook frame...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
@@ -763,37 +805,6 @@ static void *audiofork_thread(void *obj)
 			}
 
 			frames_sent++;
-
-			// write data if needed
-			char* buf;
-			uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
-			//ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
-			// Calculate size for output buffer (considering padding)
-			int output_size = (strlen(buf) * 3) / 4;
-			unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
-			
-			int decoded_length = decode_base64(buf, decoded_data);
-
-			struct ast_frame f = {
-				.frametype = AST_FRAME_VOICE,
-				.subclass.format = ast_format_slin,
-				.src = "AudioFork",
-				.mallocd = AST_MALLOCD_DATA,
-			};
-			f.data.ptr = decoded_data;
-			f.datalen = output_size;
-			f.samples = output_size / 2;
-			//int isoc_res = ast_frisolate(&f);
-			/*
-			if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, f.data.ptr, f.datalen)) {
-			}
-			*/
-			if (ast_write(audiofork->autochan->chan, &f)) {
-				ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
-			}
-
-			//ast_free(decoded_data);
-			ast_frfree(&f);
 		}
 
 		//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
@@ -821,7 +832,7 @@ static void *audiofork_thread(void *obj)
 
 	channel_name_cleanup = ast_strdupa(ast_channel_name(audiofork->autochan->chan));
 
-	ast_autochan_destroy(audiofork->autochan);
+	//ast_autochan_destroy(audiofork->autochan);
 
 	/* Datastore cleanup.  close the filestream and wait for ds destruction */
 	ast_mutex_lock(&audiofork->audiofork_ds->lock);
