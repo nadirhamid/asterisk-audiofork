@@ -319,6 +319,7 @@ struct audiofork {
 	const char *direction_string;
 	int reconnection_attempts;
 	int reconnection_timeout;
+	int websocket_recv;
 	char *post_process;
 	char *name;
 	ast_callid callid;
@@ -353,7 +354,8 @@ enum audiofork_flags {
 	MUXFLAG_DIRECTION = (1 << 15),
 	MUXFLAG_TLS = (1 << 16),
 	MUXFLAG_RECONNECTION_TIMEOUT = (1 << 17),
-	MUXFLAG_RECONNECTION_ATTEMPTS = (1 << 17),
+	MUXFLAG_RECONNECTION_ATTEMPTS = (1 << 18),
+	MUXFLAG_WEBSOCKET_RECEIVE = (1 << 18),
 };
 
 enum audiofork_args {
@@ -367,6 +369,7 @@ enum audiofork_args {
 	OPT_ARG_TLS,
 	OPT_ARG_RECONNECTION_TIMEOUT,
 	OPT_ARG_RECONNECTION_ATTEMPTS,
+	OPT_ARG_WEBSOCKET_RECEIVE,
 	OPT_ARG_ARRAY_SIZE,           /* Always last element of the enum */
 };
 
@@ -385,6 +388,7 @@ AST_APP_OPTIONS(audiofork_opts, {
 	AST_APP_OPTION_ARG('T', MUXFLAG_TLS, OPT_ARG_TLS),
 	AST_APP_OPTION_ARG('R', MUXFLAG_RECONNECTION_TIMEOUT, OPT_ARG_RECONNECTION_TIMEOUT),
 	AST_APP_OPTION_ARG('r', MUXFLAG_RECONNECTION_ATTEMPTS, OPT_ARG_RECONNECTION_ATTEMPTS),
+	AST_APP_OPTION_ARG('w', MUXFLAG_WEBSOCKET_RECEIVE, OPT_ARG_WEBSOCKET_RECEIVE),
 });
 
 struct audiofork_ds {
@@ -670,44 +674,7 @@ static void audiofork_free(struct audiofork *audiofork)
 	}
 }
 
-static void *audiofork_send_thread(void *obj)
-{
-	struct audiofork *audiofork = obj;
-	const char* chan_name = ast_channel_name( audiofork->autochan->chan );
 
-	// write data if needed
-	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
-		char* buf;
-		uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
-		//ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
-		// Calculate size for output buffer (considering padding)
-		int output_size = (strlen(buf) * 3) / 4;
-		unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
-		
-		int decoded_length = decode_base64(buf, decoded_data);
-
-		struct ast_frame f = {
-			.frametype = AST_FRAME_VOICE,
-			.subclass.format = ast_format_slin,
-			.src = "AudioFork",
-			.mallocd = AST_MALLOCD_DATA,
-		};
-		f.data.ptr = decoded_data;
-		f.datalen = output_size;
-		f.samples = output_size / 2;
-		//int isoc_res = ast_frisolate(&f);
-		/*
-		if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, f.data.ptr, f.datalen)) {
-		}
-		*/
-		if (ast_write(audiofork->autochan->chan, &f)) {
-			ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
-		}
-
-		//ast_free(decoded_data);
-		ast_frfree(&f);
-	}
-}
 
 static void *audiofork_thread(void *obj)
 {
@@ -742,6 +709,7 @@ static void *audiofork_thread(void *obj)
 	}
 
 	ast_verb(2, "<%s> [AudioFork] (%s) Begin AudioFork Recording %s\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, audiofork->name);
+	ast_verb(2, "<%s> [AudioFork] (%s) AudioFork receive mode =  %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, audiofork->websocket_recv);
 
 	//fs = &audiofork->audiofork_ds->fs;
 
@@ -754,72 +722,120 @@ static void *audiofork_thread(void *obj)
 	int len_to_copy = min_len;
 	const char* chan_name = ast_channel_name( audiofork->autochan->chan );
 
-	pthread_t send_pthread;
-	audiofork->callid = ast_read_threadstorage_callid();
+	if (ast_fd_set_flags(ast_websocket_fd(audiofork->websocket), O_NONBLOCK)) {
+		ast_log(LOG_ERROR, "<%s> Could not connect to websocket server: %s\n", ast_channel_name(audiofork->autochan->chan), audiofork->audiofork_ds->wsserver);
 
-	ast_pthread_create_detached_background(&send_pthread, NULL, audiofork_send_thread, audiofork);
+		ast_test_suite_event_notify("AUDIOFORK_END", "Ws server: %s\r\n", audiofork->wsserver);
 
-	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
-		// ast_verb(2, "<%s> [AudioFork] (%s) Reading Audio Hook frame...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		struct ast_frame *fr = ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME, audiofork->direction, format_slin);
+		/* kill the audiohook */
+		destroy_monitor_audiohook(audiofork);
+		ast_autochan_destroy(audiofork->autochan);
 
-		if (!fr) {
-			ast_audiohook_trigger_wait(&audiofork->audiohook);
+		/* We specifically don't do audiofork_free(audiofork) here because the automatic datastore cleanup will get it */
 
-			if (audiofork->audiohook.status != AST_AUDIOHOOK_STATUS_RUNNING) {
-				ast_verb(2, "<%s> [AudioFork] (%s) AST_AUDIOHOOK_STATUS_RUNNING = 0\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-				break;
+		ast_module_unref(ast_module_info->self);
+
+		return 0;
+    }
+
+	if (audiofork->websocket_recv == 1) {
+		while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
+			// write data if needed
+			char* buf;
+			uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
+
+			ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
+			// Calculate size for output buffer (considering padding)
+			int output_size = (strlen(buf) * 3) / 4;
+			unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
+			
+			int decoded_length = decode_base64(buf, decoded_data);
+
+			struct ast_frame f = {
+				.frametype = AST_FRAME_VOICE,
+				.subclass.format = ast_format_slin,
+				.src = "AudioFork",
+				.mallocd = AST_MALLOCD_DATA,
+			};
+			f.data.ptr = decoded_data;
+			f.datalen = output_size;
+			f.samples = output_size / 2;
+			//int isoc_res = ast_frisolate(&f);
+			/*
+			if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, f.data.ptr, f.datalen)) {
+			}
+			*/
+			if (ast_write(audiofork->autochan->chan, &f)) {
+				ast_log(LOG_WARNING, "Failed to forward frame to channel %s\n", chan_name);
 			}
 
-			continue;
+			//ast_free(decoded_data);
+			ast_frfree(&f);
 		}
+	} else {
 
-		/* audiohook lock is not required for the next block.
-		 * Unlock it, but remember to lock it before looping or exiting */
-		ast_audiohook_unlock(&audiofork->audiohook);
-		struct ast_frame *cur;
+		while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
+			// ast_verb(2, "<%s> [AudioFork] (%s) Reading Audio Hook frame...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+			struct ast_frame *fr = ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME, audiofork->direction, format_slin);
 
-		//ast_mutex_lock(&audiofork->audiofork_ds->lock);
-		for (cur = fr; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
-			// ast_verb(2, "<%s> sending audio frame to websocket...\n", ast_channel_name(audiofork->autochan->chan));
-			// ast_mutex_lock(&audiofork->audiofork_ds->lock);
+			if (!fr) {
+				ast_audiohook_trigger_wait(&audiofork->audiohook);
 
-			if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
-
-				ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnecting...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-				reconn_status = audiofork_start_reconnecting(audiofork);
-
-				if (reconn_status == 1) {
-					audiofork->websocket = NULL;
-					audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
+				if (audiofork->audiohook.status != AST_AUDIOHOOK_STATUS_RUNNING) {
+					ast_verb(2, "<%s> [AudioFork] (%s) AST_AUDIOHOOK_STATUS_RUNNING = 0\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 					break;
 				}
 
-				/* re-send the last frame */
+				continue;
+			}
+
+			/* audiohook lock is not required for the next block.
+			* Unlock it, but remember to lock it before looping or exiting */
+			ast_audiohook_unlock(&audiofork->audiohook);
+			struct ast_frame *cur;
+
+			//ast_mutex_lock(&audiofork->audiofork_ds->lock);
+			for (cur = fr; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
+				// ast_verb(2, "<%s> sending audio frame to websocket...\n", ast_channel_name(audiofork->autochan->chan));
+				// ast_mutex_lock(&audiofork->audiofork_ds->lock);
+
 				if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
-					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not re-write to websocket.  Complete Failure.\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
 
-					audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
-					break;
+					ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not write to websocket.  Reconnecting...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+					reconn_status = audiofork_start_reconnecting(audiofork);
+
+					if (reconn_status == 1) {
+						audiofork->websocket = NULL;
+						audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
+						break;
+					}
+
+					/* re-send the last frame */
+					if (ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_BINARY, cur->data.ptr, cur->datalen)) {
+						ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Could not re-write to websocket.  Complete Failure.\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+
+						audiofork->audiohook.status = AST_AUDIOHOOK_STATUS_SHUTDOWN;
+						break;
+					}
 				}
+
+				frames_sent++;
 			}
 
-			frames_sent++;
+			//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
+			//
+
+			/* All done! free it. */
+			if (fr) {
+				ast_frame_free(fr, 0);
+			}
+
+			fr = NULL;
+
+			//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
+
+			ast_audiohook_lock(&audiofork->audiohook);
 		}
-
-		//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
-		//
-
-		/* All done! free it. */
-		if (fr) {
-			ast_frame_free(fr, 0);
-		}
-
-		fr = NULL;
-
-		//ast_mutex_unlock(&audiofork->audiofork_ds->lock);
-
-		ast_audiohook_lock(&audiofork->audiohook);
 	}
 
 	ast_audiohook_unlock(&audiofork->audiohook);
@@ -832,7 +848,7 @@ static void *audiofork_thread(void *obj)
 
 	channel_name_cleanup = ast_strdupa(ast_channel_name(audiofork->autochan->chan));
 
-	//ast_autochan_destroy(audiofork->autochan);
+	ast_autochan_destroy(audiofork->autochan);
 
 	/* Datastore cleanup.  close the filestream and wait for ds destruction */
 	ast_mutex_lock(&audiofork->audiofork_ds->lock);
@@ -919,6 +935,7 @@ static int launch_audiofork_thread(
 	char* tcert,
 	int reconn_timeout,
 	int reconn_attempts,
+	int websocket_recv,
 	int readvol, int writevol,
 	const char *post_process,
 	const char *uid_channel_var,
@@ -989,6 +1006,8 @@ static int launch_audiofork_thread(
 	audiofork->reconnection_attempts = reconn_attempts;
 	// 5 seconds
 	audiofork->reconnection_timeout = reconn_timeout;
+
+	audiofork->websocket_recv = websocket_recv;
 
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection attempts to %d\n", ast_channel_name(chan), audiofork->reconnection_attempts);
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection timeout to %d\n", ast_channel_name(chan), audiofork->reconnection_timeout);
@@ -1067,6 +1086,7 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 	char *tcert = NULL;
 	int reconn_timeout = 5;
 	int reconn_attempts = 5;
+	int websocket_recv = 0;
 	AST_DECLARE_APP_ARGS(args, 
 		AST_APP_ARG(wsserver);
 		AST_APP_ARG(options);
@@ -1165,6 +1185,11 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 			reconn_attempts = atoi( S_OR(opts[OPT_ARG_RECONNECTION_ATTEMPTS], "15") );
 			ast_verb(2, "Reconnection attempts set to: %d\n", reconn_attempts);
 		}
+
+		if (ast_test_flag(&flags, MUXFLAG_WEBSOCKET_RECEIVE)) {
+			websocket_recv = 1;
+			ast_verb(2, "Websocket set to receive only mode\n");
+		}
 	}
 
 	/* If there are no file writing arguments/options for the mix monitor, send a warning message and return -1 */
@@ -1217,6 +1242,7 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 		tcert,
 		reconn_timeout,
 		reconn_attempts,
+		websocket_recv,
 		readvol,
 		writevol,
 		args.post_process, 
