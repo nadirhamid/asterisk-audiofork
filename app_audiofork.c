@@ -744,7 +744,7 @@ static void *audiofork_thread(void *obj)
 			char* buf;
 			uint64_t payload_len =ast_websocket_read_string(audiofork->websocket, &buf);
 
-			ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
+			//ast_verb(4, "received data length = %d raw contents = %s", payload_len, buf);
 			// Calculate size for output buffer (considering padding)
 			int output_size = (strlen(buf) * 3) / 4;
 			unsigned char *decoded_data = (unsigned char *)ast_malloc(output_size);
