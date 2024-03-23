@@ -1,17 +1,15 @@
 ## What is app_audiofork
 
-app_audiofork lets you integrate raw audio streams in your third party app by making minor adjustments to your asterisk dialplan. 
+app_audiofork helps you send audio from Asterisk to a websocket server easily.
 
-The asterisk app simply pushes any Asterisk audio to a web socket server.
-
-For example:
+For instance:
 ```
 ASTERISK -> AUDIO STREAM -> WS APP SERVER
 ```
 
-The main purpose of this app is to provide a simple integration with the Asterisk audiohooks API -- allowing developers to integrate higher level programs for audio processing.
+The primary objective of this module is to offer a straightforward integration with the Asterisk audiohooks API, providing an interface for developers to better analyze audio and run other processing tasks on it.
 
-# How to install
+# How to install it
 
 You can use the Makefile to easily install app_audiofork. 
 
@@ -24,11 +22,11 @@ make install
 
 ## Load module
 
-Afterwards, you will need to load the module.
+Afterwards, you can load the module with the following command:
 
-You can simply run the following command:
-
+```
 asterisk -rx 'module load app_audiofork.so'
+```
 
 # Configuring in dial plans
 
@@ -45,14 +43,14 @@ exten => _X.,n,Hangup()
 
 # Configuring a Websocket server
 
-In order to integrate the module, it is advised that you use a websocket server that is compliant with the latest standard. In other words, it should support both text and binary data frames.
+In order to integrate the module, it is advised that you use a websocket server that is compliant with the latest standard. In other words, it should reliably send both text and binary data frames.
 
-Here is an example of a Node.js Websocket module:
+Here is a recommended Node.js Websocket module:
 [WebSocket nodejs server](https://github.com/websockets/ws)
 
 # Example: simple integration
 
-Below is an example that receives audio frames from the AudioFork app and stores them into a audio file.
+Below is an example that receives audio frames from the AudioFork app and stores them in a audio file.
 
 ```
 const WebSocket = require('ws');
@@ -86,7 +84,7 @@ sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
 
 In a production scenario, it is common to handle both the incoming and outgoing legs of a call.  The basic example doesn't do that, but it is certainly possible.
 
-Below is an example including a WebSocket server that handles two connections and stores each stream in its own unique file.
+Below is an example including a WebSocket server that handles two connections and stores each stream in its a unique file.
 
 Updated dialplan
 
@@ -158,9 +156,13 @@ server.on('upgrade', function upgrade(request, socket, head) {
 server.listen(8080);
 ```
 
-# Live transcription demo
+# Live transcription demos
 
-For a demo integration with Google Cloud speech APIs, please see: [Asterisk Transcribe Demo](https://github.com/nadirhamid/audiofork-transcribe-demo)
+You can refer to the following demos for more complete integrations.
+
+- [Google cloud speech Transcribe Demo](https://github.com/nadirhamid/audiofork-google-cloud-speech-demo)
+- [Azure demo integration](https://github.com/nadirhamid/audiofork-azure-transcribe-demo)
+- [Amazon transcribe demo](https://github.com/nadirhamid/audiofork-amazon-transcribe-demo)
 
 # TLS support
 
