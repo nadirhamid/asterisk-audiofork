@@ -1,106 +1,132 @@
-# AudioFork – پخش صوت آستریسک از طریق وب‌سوکت
+# AudioFork – Real‑time Asterisk Audio Streaming over WebSocket
 
-📖 **این مستند را به انگلیسی بخوانید:** [README.md](README.md)
+[![License](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
+[![Asterisk](https://img.shields.io/badge/Asterisk-13%2B-green.svg)](https://www.asterisk.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+[![GitHub stars](https://img.shields.io/github/stars/hosseinhunta/asterisk-audiofork.svg?style=social&label=Star&maxAge=2592000)](https://github.com/hosseinhunta/asterisk-audiofork)
 
----
-
-## ۱. عنوان و معرفی
-
-**فارسی**
-
-**AudioFork** یک ماژول آستریسک است که جریان‌های صوتی خام را از یک کانال آستریسک به صورت لحظه‌ای به یک سرور وب‌سوکت در حال اجرا منتقل می‌کند. این امکان را برای طیف گسترده‌ای از کاربردهای پردازش زنده فراهم می‌آورد؛ مانند ترانسکریپشن تلفظ‌به‌متن، ضبط تماس، تحلیل احساسی/صوتی، تشخیص آکوستیک و هر برنامهٔ دیگری که صدای زنده مصرف می‌کند.
-
-ماژول بر پایهٔ API `ast_audiohook` آستریسک ساخته شده است که اجازه می‌دهد صدای کانال را بدون مختل کردن تماس رهگیری کند. نسخهٔ **اصلی** `app_audiofork` (توسط نادیر حمید) قابلیت پایهٔ پخش صدای SLIN با نرخ ۸ کیلوهرتز به وب‌سوکت را معرفی کرد. این **نسخهٔ به‌روزرسانی‌شده** بر اساس نیازهای واقعی تولیدی، فرمت‌های صوتی قابل تنظیم (کدک و نرخ نمونه‌برداری)، اتصال مجدد مقاوم با پس‌زمینهٔ نمایی، هدرهای HTTP سفارشی و احراز هویت با توکن Bearer، مذاکرهٔ زیرپروتکل وب‌سوکت، ارسال متادیتای JSON، پاک‌سازی هدرها و مدیریت دقیق قطع را اضافه کرده است.
+📖 **Read this document in Persian:** [README_fa.md](README_fa.md)
 
 ---
 
-## ۲. اعتبارات و مجوز
+## 🚀 Quick Start
 
-**فارسی**
+Stream live audio from any Asterisk channel to a WebSocket server in just a few lines:
 
-_پدیدآورندهٔ اصلی:_ **نادیر حمید** – پروژهٔ اصلی `app_audiofork`. (مرجع مخزن: منبع اصلی در جامعهٔ آستریسک شناخته‌شده است؛ نگاه کنید به `app_audiofork` اصلی اثر نادیر حمید.)
+```text
+exten => 100,1,Answer()
+exten => 100,n,AudioFork(ws://your-server:8080/in,c(SLIN)L(8000)M)
+```
 
-_نگهدار و مشارکت‌کننده:_ **حسین محمدان (Hosseinhunta)** – [https://github.com/hosseinhunta](https://github.com/hosseinhunta). این نسخه بر اساس نیازهای واقعی تولیدی نگهداری، بهبود و رفع باگ‌های بحرانی شده است. کد اکنون مقاوم‌تر و ایمن‌تر است.
-
-_مجوز:_ گواهی عمومی گنو نسخه ۲.۰ (GNU GPL v2). فایل `LICENSE` را در این مخزن ببینید. این یک اثر مشتق است؛ هر دو نسخهٔ اصلی و بهبودیافته تحت GPLv2 توزیع می‌شوند.
-
----
-
-## ۳. ویژگی‌های کلیدی
-
-**فارسی**
-
-| ویژگی                                  | گزینه    | توضیح                                                                                                                                                                                         |
-| :------------------------------------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| فرمت‌های صوتی متعدد                    | `c`, `L` | SLIN با ۸/۱۶/۳۲/۴۸ کیلوهرتز به همراه کدک‌های G722، PCMU، PCMA. آستریسک به صورت خودکار تبدیل می‌کند.                                                                                           |
-| هدرهای HTTP سفارشی و احراز هویت Bearer | `H`, `A` | در طول handshake وب‌سوکت ارسال می‌شوند. هنگام وجود `ast_websocket_client_create_with_headers` استفاده می‌شوند؛ در غیر این صورت هشدار واضحی ثبت شده و به زیرپروتکل/پارامترهای URL بازمی‌گردند. |
-| زیرپروتکل وب‌سوکت                      | `s`      | مثلاً `audio/raw`. در طول handshake مذاکره می‌شود (پیش‌فرض `echo`).                                                                                                                           |
-| متادیتای JSON                          | `M`      | یک فریم متنی (کانال، شناسه تماس‌گیرنده، شماره گرفته‌شده، زمان شروع، نرخ نمونه، کدک) قبل از جریان صوت ارسال می‌شود.                                                                            |
-| پس‌زمینهٔ نمایی                        | –        | تاخیر هر بار دو برابر می‌شود، سقف ۳۰ ثانیه، حداکثر `r` بار.                                                                                                                                   |
-| قطع سریع                               | –        | `StopAudioFork` در حدود ۱۰۰ میلی‌ثانیه اعمال می‌شود (مبتنی بر nanosleep).                                                                                                                     |
-| پاک‌سازی هدرها                         | –        | کاراکترهای کنترل حذف؛ جفت‌های نامعتبر نادیده گرفته می‌شوند تا از تزریق جلوگیری شود.                                                                                                           |
-| تلاش مجدد متادیتا                      | –        | حداکثر ۳ بار با تاخیر ۲۰۰ میلی‌ثانیه؛ شکست ثبت می‌شود اما صدا ادامه می‌یابد.                                                                                                                  |
+That's it! Your audio stream is now available for real‑time processing (speech‑to‑text, analytics, recording, etc.).
 
 ---
 
-## ۴. نصب و راه‌اندازی
+## 1. Project Introduction
 
-**فارسی**
+**AudioFork** is a high‑performance **Asterisk module** that captures raw audio from a live channel and forwards it **in real‑time** to a **WebSocket server**. This unlocks unlimited possibilities for **live voice processing**, including:
 
-_پیش‌نیازها_
+- 🎤 **Speech‑to‑Text** (STT) transcription
+- 📞 **Call recording** and archiving
+- 📊 **Sentiment & voice analytics**
+- 🔊 **Acoustic event detection**
+- 🤖 **AI‑powered voice assistants**
 
-- آستریسک **۱۳+** (تست شده روی ۱۸.x / ۲۰.x).
-- ماژول‌های اجرایی بارگذاری‌شده در آستریسک: `func_periodic_hook` (اختیاری، برای بوق دوره‌ای)، `codec_g722`، `codec_ulaw`، `codec_alaw` و `res_websocket`.
-- هدرهای توسعه از درخت منبع آستریسک شما.
+Built on Asterisk’s powerful `ast_audiohook` API, it intercepts audio **without disrupting** the ongoing call. The original `app_audiofork` (by **Nadir Hamid**) provided basic SLIN 8 kHz streaming. This **enhanced version** adds production‑ready features: **configurable codecs** (SLIN/G722/PCMU/PCMA), **sample rates** up to 48 kHz, **Bearer token authentication**, **custom HTTP headers**, **WebSocket subprotocol negotiation**, **JSON metadata**, **exponential‑backoff reconnection**, **header sanitisation**, and **sub‑100ms interruption** – all based on real‑world deployment needs.
 
-_ساخت و نصب_
+---
+
+## 2. Why AudioFork?
+
+| Challenge               | How AudioFork Solves It                                                   |
+| :---------------------- | :------------------------------------------------------------------------ |
+| **Complex transcoding** | Automatically transcodes channel audio to your desired codec/rate.        |
+| **Authentication**      | Supports Bearer tokens and custom headers (with runtime fallback).        |
+| **Network instability** | Intelligent reconnection with exponential backoff keeps the stream alive. |
+| **Real‑time metadata**  | Sends JSON metadata before the audio stream for context‑aware processing. |
+| **Security**            | Built‑in header sanitisation prevents injection attacks.                  |
+| **Performance**         | Low‑latency, efficient audio streaming with minimal CPU overhead.         |
+
+---
+
+## 3. Key Features
+
+| Feature                          | Option   | Description                                                                                      |
+| :------------------------------- | :------- | :----------------------------------------------------------------------------------------------- |
+| **Multiple audio formats**       | `c`, `L` | SLIN at 8/16/32/48 kHz, G722, PCMU, PCMA. Auto‑transcoded.                                       |
+| **Custom headers & Bearer auth** | `H`, `A` | Sent during WebSocket handshake. Uses `ast_websocket_client_create_with_headers` when available. |
+| **WebSocket subprotocol**        | `s`      | E.g. `audio/raw`; defaults to `echo`.                                                            |
+| **JSON metadata**                | `M`      | TEXT frame with channel, caller ID, dialed number, start time, codec, sample rate.               |
+| **Exponential backoff**          | –        | Delay doubles each attempt, capped at 30 s, up to `r` attempts.                                  |
+| **Fast interruption**            | –        | `StopAudioFork` honoured within ~100 ms (nanosleep‑based).                                       |
+| **Header sanitisation**          | –        | Strips control chars; skips malformed pairs to prevent injection.                                |
+| **Metadata retry**               | –        | Up to 3 attempts with 200 ms delay; audio continues on failure.                                  |
+
+---
+
+## 4. Use Cases
+
+- **Real‑time Transcription** – Feed audio directly to STT engines (e.g., Google Cloud, Azure, Whisper).
+- **Call Analytics** – Analyse customer sentiment or detect keywords during live calls.
+- **Voice Biometrics** – Identify speakers or detect anomalies in real time.
+- **Recording & Archiving** – Store audio streams in cloud storage or local servers.
+- **AI Assistants** – Enable voice‑enabled bots that respond during calls.
+
+---
+
+## 5. Installation & Build
+
+### Prerequisites
+
+- Asterisk **13+** (tested on 18.x / 20.x)
+- Loaded modules: `func_periodic_hook` (optional), `codec_g722`, `codec_ulaw`, `codec_alaw`, `res_websocket`
+- Development headers from your Asterisk source tree
+
+### Build & Install
 
 ```bash
-# ASTTOPDIR را به درخت منبع آستریسک اشاره دهید
 make ASTTOPDIR=/usr/src/asterisk
 sudo make install ASTTOPDIR=/usr/src/asterisk
 ```
 
-_بارگذاری ماژول_
+### Load the Module
 
 ```bash
-# از خط فرمان آستریسک:
+# From Asterisk CLI:
 module load app_audiofork.so
 
-# برای بارگذاری خودکار در شروع، به /etc/asterisk/modules.conf اضافه کنید:
+# Auto‑load at startup – add to /etc/asterisk/modules.conf:
 [modules]
 load => app_audiofork.so
 ```
 
 ---
 
-## ۵. راهنمای استفاده
+## 6. Usage Guide
 
-**فارسی**
-
-_مثال دایل‌پلن_
+### Dialplan Example
 
 ```text
 exten => 100,1,Answer()
 exten => 100,n,AudioFork(ws://127.0.0.1:8080/in,c(SLIN)L(8000)s(audio/raw)M,A(my-jwt)H(X-Api-Key:abc123))
 ```
 
-_مرجع گزینه‌ها_
+### Option Reference
 
-| گزینه        | معنی                                                                                             |
-| :----------- | :----------------------------------------------------------------------------------------------- |
-| `c(codec)`   | کدک: `SLIN`، `G722`، `PCMU`، `PCMA`.                                                             |
-| `L(rate)`    | نرخ نمونه‌برداری SLIN: `8000`، `16000`، `32000`، `48000`. برای کدک‌های دیگر نادیده گرفته می‌شود. |
-| `s(proto)`   | زیرپروتکل وب‌سوکت (مثلاً `audio/raw`).                                                           |
-| `M`          | فعال‌سازی فریم متادیتای JSON قبل از صدا.                                                         |
-| `A(token)`   | توکن Bearer؛ هدر `Authorization: Bearer <token>` اضافه می‌کند.                                   |
-| `H(k:v,k:v)` | هدرهای سفارشی به صورت زوج‌های `Key:Value` جدا شده با کاما.                                       |
-| `R(sec)`     | تاخیر اولیهٔ اتصال مجدد به ثانیه (همچنین پایهٔ پس‌زمینه).                                        |
-| `r(n)`       | حداکثر تعداد تلاش‌های اتصال مجدد.                                                                |
-| `T(cert)`    | مسیر گواهی TLS برای اتصال‌های امن (`wss://`).                                                    |
-| `D(dir)`     | جهت: `in`، `out` یا `both` (پیش‌فرض).                                                            |
+| Option       | Meaning                                                                        |
+| :----------- | :----------------------------------------------------------------------------- |
+| `c(codec)`   | Codec: `SLIN`, `G722`, `PCMU`, `PCMA`                                          |
+| `L(rate)`    | SLIN sample rate: `8000`, `16000`, `32000`, `48000` (ignored for other codecs) |
+| `s(proto)`   | WebSocket subprotocol (e.g., `audio/raw`)                                      |
+| `M`          | Enable JSON metadata frame before audio                                        |
+| `A(token)`   | Bearer token – adds `Authorization: Bearer <token>` header                     |
+| `H(k:v,k:v)` | Custom headers as comma‑separated `Key:Value` pairs                            |
+| `R(sec)`     | Initial reconnection delay in seconds (backoff base)                           |
+| `r(n)`       | Max reconnection attempts                                                      |
+| `T(cert)`    | TLS certificate path for secure (`wss://`) connections                         |
+| `D(dir)`     | Direction: `in`, `out`, or `both` (default)                                    |
 
-_اقدامات AMI_
+### AMI Actions
 
 ```text
 Action: AudioFork
@@ -119,7 +145,7 @@ Direction: both
 State: 1
 ```
 
-_فرمان‌های CLI_
+### CLI Commands
 
 ```bash
 asterisk -rx "audiofork start PJSIP/1001-00000001 ws://127.0.0.1:8080/in,c(SLIN)L(8000)M"
@@ -129,69 +155,63 @@ asterisk -rx "audiofork list PJSIP/1001-00000001"
 
 ---
 
-## ۶. نمای کلی معماری
-
-**فارسی**
+## 7. Architecture Overview
 
 ```
-کانال آستریسک
-      │  ast_audiohook (spy) صدا را رهگیری می‌کند
+Asterisk channel
+      │  ast_audiohook (spy) intercepts audio
       ▼
 audiofork_thread
-      │  ast_audiohook_read_frame(format)  → به کدک/نرخ درخواستی تبدیل می‌شود
+      │  ast_audiohook_read_frame(format)  → transcoded to requested codec/rate
       │
-      ├─(یک بار، در صورت M)─▶ متادیتای JSON به صورت فریم TEXT
+      ├─(once, if M)─▶ JSON metadata as TEXT frame
       │
-      └─(حلقه)──────▶ فریم‌های صوت به صورت فریم‌های BINARY ──▶ سرور وب‌سوکت
+      └─(loop)──────▶ audio frames as BINARY frames ──▶ WebSocket server
 ```
 
-- `struct audiofork` – وضعیت هر نشست که متعلق به نخ fork است: audiohook، `ast_format` حل‌شده، کدک/نرخ/زیرپروتکل/هدرها، پرچم متادیتا و پرچم‌ها.
-- `struct audiofork_ds` – یک datastore متصل به کانال که URL وب‌سوکت، فرمت و قفل‌های همگام‌سازی را نگه می‌دارد. **عمر آن تک‌مالک است**: نخ fork پس از `ast_cond_wait()` آن را آزاد کرده و `audiofork->audiofork_ds` را NULL می‌کند؛ `audiofork_free()` فقط در صورت غیر‑NULL بودن آن را آزاد می‌کند. حفظ این قاعده از دوبار‑آزادسازی / استفاده‑پس‑از‑آزادسازی جلوگیری می‌کند.
+- `struct audiofork` – per‑session state owned by the fork thread: the audiohook, resolved `ast_format`, codec/rate/subprotocol/headers, metadata flag, and flags.
+- `struct audiofork_ds` – datastore attached to the channel holding the WebSocket URL, format, and synchronisation locks. **Single‑owner lifetime**: the fork thread frees it after `ast_cond_wait()` and NULLs `audiofork->audiofork_ds`; `audiofork_free()` only frees it when non‑NULL. This prevents double‑free / use‑after‑free.
 
 ---
 
-## ۷. رفع اشکالات و بهبودها نسبت به نسخه اصلی
+## 8. Fixes & Improvements Over the Original
 
-**فارسی**
-
-۱. **رفع دوبار‑آزادسازی بحرانیِ `audiofork_ds`.** مالکیت به نخ fork منتقل شد که ساختار را پس از برآورده شدن شرط تخریب آزاد کرده و اشاره‌گر را NULL می‌کند تا `audiofork_free()` نتواند آن را دو بار آزاد کند.
-۲. **ارسال واقعی هدرهای سفارشی و توکن Bearer.** ماژول `ast_websocket_client_create_with_headers` را در زمان اجرا از طریق `dlsym()` حل می‌کند. در صورت وجود، هدرهای `-H`/`-A` در طول handshake ارسال می‌شوند؛ در غیر این صورت یک `LOG_WARNING` واضح توضیح می‌دهد که هدرها ارسال نمی‌شوند (از زیرپروتکل یا `?token=...` در URL استفاده کنید).
-۳. **افزودن اعتبارسنجی ورودی هدرها.** `audiofork_normalize_headers()` کاراکترهای کنترل را حذف کرده و جفت‌های نامعتبر (فاقد `:`) را نادیده می‌گیرد و از حملات تزریق هدر جلوگیری می‌کند.
-۴. **بهبود دقت `audiofork_sleep_interruptible`.** حلقهٔ `sleep(1)` با `nanosleep()` به دانه‌بندی ۱۰۰ میلی‌ثانیه جایگزین شد، تا `StopAudioFork` در حدود ۱۰۰ میلی‌ثانیه اعمال شود.
-۵. **افزودن منطق تلاش مجدد برای ارسال متادیتا.** ارسال متادیتای JSON حداکثر ۳ بار با تاخیر ۲۰۰ میلی‌ثانیه تلاش می‌شود؛ در صورت شکست خطا ثبت شده اما جریان صوت ادامه می‌یابد.
+1. **Fixed critical double‑free** of `audiofork_ds` – ownership moved to the fork thread.
+2. **Actually transmit custom headers and Bearer token** – runtime `dlsym()` of `ast_websocket_client_create_with_headers` with clear fallback warning.
+3. **Input validation for headers** – `audiofork_normalize_headers()` strips control chars and skips malformed pairs.
+4. **Precise interruption** – replaced `sleep(1)` with `nanosleep()` (100 ms granularity).
+5. **Metadata retry logic** – up to 3 attempts with 200 ms delay; audio continues on failure.
 
 ---
 
-## ۸. عیب‌یابی
+## 9. Troubleshooting
 
-**فارسی**
-
-| مشکل                        | راه‌حل                                                                                                                                                                                                                                 |
-| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **هدرها ارسال نمی‌شوند**    | در آستریسک استاندارد، `ast_websocket_client_create_with_headers` در دسترس نیست. اعتبارنامه‌ها را از طریق زیرپروتکل یا رشتهٔ پرس‌وجو در URL بدهید، مثلاً `ws://host/stream?token=...`. هنگام وقوع این حالت یک `LOG_WARNING` چاپ می‌شود. |
-| **اتصال مجدد شکست می‌خورد** | مقادیر `R` (تاخیر اولیه) و `r` (تعداد تلاش‌ها) را بررسی کنید و دسترسی شبکه/فایروال به سرور وب‌سوکت را تأیید کنید.                                                                                                                      |
-| **نشت حافظه**               | همیشه fork را تمیز متوقف کنید: `StopAudioFork` را فراخوانی کنید (دایل‌پلن/AMI/CLI) یا اجازه دهید کانال قطع شود؛ این پاک‌سازی datastore را راه‌اندازی می‌کند.                                                                           |
-| **ماژول بارگذاری نمی‌شود**  | مطمئن شوید ماژول‌های پیش‌نیاز بارگذاری شده‌اند: `res_websocket`، `codec_g722`، `codec_ulaw`، `codec_alaw` (و `func_periodic_hook` در صورت استفاده از بوق). تأیید کنید که در برابر نسخهٔ صحیح آستریسک ساخته شده است.                    |
+| Issue                  | Solution                                                                                                                                                                        |
+| :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Headers not sent**   | On stock Asterisk, `ast_websocket_client_create_with_headers` is unavailable. Use subprotocol or URL query string (`?token=...`). A `LOG_WARNING` is printed.                   |
+| **Reconnection fails** | Check `R` and `r` values, network reachability, and firewall to the WebSocket server.                                                                                           |
+| **Memory leaks**       | Always stop the fork cleanly with `StopAudioFork` (dialplan/AMI/CLI) or let the channel hang up.                                                                                |
+| **Module not loading** | Ensure prerequisites are loaded: `res_websocket`, `codec_g722`, `codec_ulaw`, `codec_alaw` (and `func_periodic_hook` for beep). Confirm build against correct Asterisk version. |
 
 ---
 
-## ۹. مشارکت
+## 10. Support & Contributing
 
-**فارسی**
+- **Report bugs** or **request features** via [GitHub Issues](https://github.com/hosseinhunta/asterisk-audiofork/issues).
+- **Submit improvements** via Pull Requests.
+- **Questions?** Open a discussion or reach out to the maintainer.
 
-مشارکت‌ها، گزارش باگ‌ها و درخواست‌های ویژگی خوش‌آمدند. لطفاً یک issue یا pull request در فورک نگهداری‌شده باز کنید: [https://github.com/hosseinhunta](https://github.com/hosseinhunta). هنگام گزارش مشکل، نسخهٔ آستریسک، گزینه‌های دقیق `AudioFork(...)` استفاده‌شده و هر خط لاگ `[AudioFork]` را ضمیمه کنید.
-
----
-
-## ۱۰. تاریخچه تغییرات
-
-**فارسی**
-
-| نسخه                  | پدیدآورنده                 | یادداشت‌ها                                                                                                                                                                                                                                                                                                                                                                      |
-| :-------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| اصلی                  | نادیر حمید                 | پخش پایهٔ صوت وب‌سوکت (SLIN ۸ کیلوهرتز).                                                                                                                                                                                                                                                                                                                                        |
-| بهبودیافته (این فورک) | حسین محمدان (Hosseinhunta) | کدک/نرخ قابل تنظیم (`c`,`L`)؛ زیرپروتکل (`s`)؛ هدرهای سفارشی و احراز هویت Bearer (`H`,`A`) از طریق `dlsym` زمان اجرا از `ast_websocket_client_create_with_headers`؛ متادیتای JSON (`M`) با ارسال ۳‑باره؛ اتصال مجدد با پس‌زمینهٔ نمایی (`R`,`r`)؛ قطع مبتنی بر `nanosleep` با دانه‌بندی ۱۰۰ میلی‌ثانیه؛ پاک‌سازی ورودی هدرها؛ رفع دوبار‑آزادسازی بحرانیِ `audiofork_ds`. GPLv2. |
+**Maintainer:** [Hossein Mohhmadian (Hosseinhunta)](https://github.com/hosseinhunta)
 
 ---
 
-_مجوز: گواهی عمومی گنو نسخه ۲.۰ — فایل `LICENSE` را ببینید._
+## 11. Changelog
+
+| Version              | Author                            | Notes                                                                                                                                                                                                                                                                                      |
+| :------------------- | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Original             | Nadir Hamid                       | Basic WebSocket audio forking (SLIN 8 kHz).                                                                                                                                                                                                                                                |
+| Enhanced (this fork) | Hossein Mohhmadian (Hosseinhunta) | Configurable codec/rate (`c`,`L`); subprotocol (`s`); custom headers & Bearer auth (`H`,`A`) via runtime `dlsym`; JSON metadata (`M`) with retry; exponential‑backoff reconnection (`R`,`r`); `nanosleep`‑based 100 ms interruption; header sanitisation; critical double‑free fix. GPLv2. |
+
+---
+
+**License:** GNU General Public License v2.0 – see the `LICENSE` file.
