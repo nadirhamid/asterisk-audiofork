@@ -67,6 +67,9 @@
 #include "asterisk/pbx.h"
 #include "asterisk/http_websocket.h"
 #include "asterisk/tcptls.h"
+#include "asterisk/strings.h"
+#include <dlfcn.h>      /* dlsym() for optional header-capable websocket constructor */
+#include <time.h>       /* struct timespec / nanosleep() */
 
 
 /*** DOCUMENTATION
@@ -146,6 +149,29 @@
 					</option>
 					<option name="r">
 						<para>Number of times to attempt reconnect before closing connections</para>
+					</option>
+					<option name="c">
+						<argument name="codec" required="true" />
+						<para>Audio codec used when sending audio over the websocket. One of: SLIN, G722, PCMU, PCMA. For SLIN the sample rate option (L) selects the rate. For G722/PCMU/PCMA the rate is fixed at 8 kHz. The channel audio is transparently transcoded into this format before transmission.</para>
+					</option>
+					<option name="L">
+						<argument name="rate" required="true" />
+						<para>Sample rate (Hz) for SLIN audio: 8000, 16000, 32000 or 48000. Ignored for non-SLIN codecs.</para>
+					</option>
+					<option name="s">
+						<argument name="subprotocol" required="true" />
+						<para>WebSocket subprotocol sent during the handshake (e.g. audio/raw).</para>
+					</option>
+					<option name="H">
+						<argument name="headers" required="true" />
+						<para>Comma separated list of custom HTTP headers sent during the websocket handshake, as key:value pairs (e.g. X-Api-Key:abc123,Authorization:Bearer xyz).</para>
+					</option>
+					<option name="A">
+						<argument name="token" required="true" />
+						<para>Bearer token sent as an <literal>Authorization: Bearer &lt;token&gt;</literal> header during the websocket handshake.</para>
+					</option>
+					<option name="M">
+						<para>Send a JSON metadata object (channel, caller ID number/name, dialed number, start time, selected sample rate and codec) over the websocket as a TEXT frame before the audio stream begins.</para>
 					</option>
 				</optionlist>
 			</parameter>
@@ -301,6 +327,14 @@
 #define SAMPLES_PER_FRAME 160
 #define get_volfactor(x) x ? ((x > 0) ? (1 << x) : ((1 << abs(x)) * -1)) : 0
 
+/*! \brief Reconnection exponential backoff boundaries (in seconds) */
+#define RECONNECT_MIN_DELAY 1
+#define RECONNECT_MAX_DELAY 30
+
+/*! \brief Default audio codec when none is specified */
+#define AUDIOFORK_DEFAULT_CODEC "SLIN"
+#define AUDIOFORK_DEFAULT_SUBPROTOCOL "echo"
+
 static const char *const app = "AudioFork";
 
 static const char *const stop_app = "StopAudioFork";
@@ -323,6 +357,14 @@ struct audiofork {
 	unsigned int flags;
 	struct ast_autochan *autochan;
 	struct audiofork_ds *audiofork_ds;
+
+	/* Configurable audio format / websocket handshake parameters */
+	char *codec;                 /*!< requested codec name (SLIN, G722, PCMU, PCMA) */
+	int sample_rate;             /*!< requested sample rate in Hz (SLIN only) */
+	char *subprotocol;           /*!< websocket subprotocol sent during handshake */
+	char *headers;               /*!< custom HTTP headers "k:v,k:v" sent during handshake */
+	unsigned int send_metadata;  /*!< send JSON metadata before the audio stream */
+	struct ast_format *format;   /*!< resolved ast_format used for audiohook reads */
 
 	/* the below string fields describe data used for creating voicemails from the recording */
 	 AST_DECLARE_STRING_FIELDS(
@@ -351,7 +393,13 @@ enum audiofork_flags {
 	MUXFLAG_DIRECTION = (1 << 15),
 	MUXFLAG_TLS = (1 << 16),
 	MUXFLAG_RECONNECTION_TIMEOUT = (1 << 17),
-	MUXFLAG_RECONNECTION_ATTEMPTS = (1 << 17),
+	MUXFLAG_RECONNECTION_ATTEMPTS = (1 << 18),
+	MUXFLAG_SAMPLE_RATE = (1 << 19),
+	MUXFLAG_CODEC = (1 << 20),
+	MUXFLAG_SUBPROTOCOL = (1 << 21),
+	MUXFLAG_HEADERS = (1 << 22),
+	MUXFLAG_AUTH = (1 << 23),
+	MUXFLAG_METADATA = (1 << 24),
 };
 
 enum audiofork_args {
@@ -365,6 +413,11 @@ enum audiofork_args {
 	OPT_ARG_TLS,
 	OPT_ARG_RECONNECTION_TIMEOUT,
 	OPT_ARG_RECONNECTION_ATTEMPTS,
+	OPT_ARG_CODEC,
+	OPT_ARG_SAMPLE_RATE,
+	OPT_ARG_SUBPROTOCOL,
+	OPT_ARG_HEADERS,
+	OPT_ARG_AUTH,
 	OPT_ARG_ARRAY_SIZE,           /* Always last element of the enum */
 };
 
@@ -383,6 +436,12 @@ AST_APP_OPTIONS(audiofork_opts, {
 	AST_APP_OPTION_ARG('T', MUXFLAG_TLS, OPT_ARG_TLS),
 	AST_APP_OPTION_ARG('R', MUXFLAG_RECONNECTION_TIMEOUT, OPT_ARG_RECONNECTION_TIMEOUT),
 	AST_APP_OPTION_ARG('r', MUXFLAG_RECONNECTION_ATTEMPTS, OPT_ARG_RECONNECTION_ATTEMPTS),
+	AST_APP_OPTION_ARG('c', MUXFLAG_CODEC, OPT_ARG_CODEC),
+	AST_APP_OPTION_ARG('L', MUXFLAG_SAMPLE_RATE, OPT_ARG_SAMPLE_RATE),
+	AST_APP_OPTION_ARG('s', MUXFLAG_SUBPROTOCOL, OPT_ARG_SUBPROTOCOL),
+	AST_APP_OPTION_ARG('H', MUXFLAG_HEADERS, OPT_ARG_HEADERS),
+	AST_APP_OPTION_ARG('A', MUXFLAG_AUTH, OPT_ARG_AUTH),
+	AST_APP_OPTION('M', MUXFLAG_METADATA),
 });
 
 struct audiofork_ds {
@@ -398,6 +457,13 @@ struct audiofork_ds {
 	char *wsserver;
 	char *beep_id;
 	struct ast_tls_config *tls_cfg;
+
+	/* Configurable audio format / websocket handshake parameters mirrored for the datastore */
+	char *codec;
+	char *subprotocol;
+	char *headers;
+	unsigned int send_metadata;
+	struct ast_format *format;
 };
 
 static void audiofork_ds_destroy(void *data)
@@ -409,6 +475,12 @@ static void audiofork_ds_destroy(void *data)
 	audiofork_ds->destruction_ok = 1;
 	ast_free(audiofork_ds->wsserver);
 	ast_free(audiofork_ds->beep_id);
+	ast_free(audiofork_ds->codec);
+	ast_free(audiofork_ds->subprotocol);
+	ast_free(audiofork_ds->headers);
+	if (audiofork_ds->format) {
+		ao2_cleanup(audiofork_ds->format);
+	}
 	ast_cond_signal(&audiofork_ds->destruction_condition);
 	ast_mutex_unlock(&audiofork_ds->lock);
 }
@@ -457,6 +529,121 @@ static int audiofork_ws_close(struct audiofork *audiofork)
 
 
 /*
+ * Remove control characters (everything below 0x20 except a horizontal tab)
+ * from a string in place. Used to sanitise custom header keys/values and to
+ * prevent header-injection attacks (e.g. embedded CR/LF).
+ */
+static void audiofork_strip_control(char *s)
+{
+	char *r, *w;
+
+	if (!s) {
+		return;
+	}
+	for (r = w = s; *r; r++) {
+		if ((unsigned char) *r < 0x20 && *r != '\t') {
+			continue;
+		}
+		*w++ = *r;
+	}
+	*w = '\0';
+}
+
+/*
+ * Validate, sanitise and normalise a raw header string of the form
+ * "Key:Value,Key:Value". Invalid pairs (missing ':' or empty key/value) are
+ * skipped with a warning; control characters are stripped. The cleaned,
+ * comma-separated string is written to \a out (bounded by \a outlen).
+ */
+static void audiofork_normalize_headers(const char *raw, char *out, size_t outlen)
+{
+	char *copy, *pair, *save = NULL;
+	size_t len = 0;
+
+	out[0] = '\0';
+	if (ast_strlen_zero(raw) || outlen < 2) {
+		return;
+	}
+
+	copy = ast_strdupa(raw);
+	for (pair = strtok_r(copy, ",", &save); pair; pair = strtok_r(NULL, ",", &save)) {
+		char *colon = strchr(pair, ':');
+		int written;
+
+		if (!colon) {
+			ast_log(LOG_WARNING, "[AudioFork] Skipping malformed header (missing ':'): '%s'\n", pair);
+			continue;
+		}
+		*colon = '\0';
+		ast_trim_blanks(pair);
+		ast_trim_blanks(colon + 1);
+		audiofork_strip_control(pair);
+		audiofork_strip_control(colon + 1);
+
+		if (ast_strlen_zero(pair) || ast_strlen_zero(colon + 1)) {
+			ast_log(LOG_WARNING, "[AudioFork] Skipping header with empty key or value\n");
+			continue;
+		}
+
+		written = snprintf(out + len, outlen - len, "%s%s:%s", len ? "," : "", pair, colon + 1);
+		if (written < 0 || (size_t) written >= outlen - len) {
+			ast_log(LOG_WARNING, "[AudioFork] Combined headers string truncated; some headers dropped\n");
+			break;
+		}
+		len += (size_t) written;
+	}
+}
+
+/*
+ * Build an ast_variable list from a (already sanitised) "Key:Value,..." string.
+ * The caller is responsible for freeing it with ast_variables_destroy().
+ */
+static struct ast_variable *audiofork_parse_headers_to_list(const char *header_str)
+{
+	struct ast_variable *head = NULL;
+	char *copy, *pair, *save = NULL;
+
+	if (ast_strlen_zero(header_str)) {
+		return NULL;
+	}
+
+	copy = ast_strdupa(header_str);
+	for (pair = strtok_r(copy, ",", &save); pair; pair = strtok_r(NULL, ",", &save)) {
+		char *colon = strchr(pair, ':');
+		if (!colon) {
+			continue; /* already validated/sanitised earlier */
+		}
+		*colon = '\0';
+		ast_trim_blanks(pair);
+		ast_trim_blanks(colon + 1);
+		ast_variable_list_append(&head, ast_variable_new(pair, colon + 1, ""));
+	}
+	return head;
+}
+
+/*
+ * Optional, header-capable WebSocket client constructor. It is NOT present in
+ * all Asterisk builds, so it is resolved at runtime via dlsym(); this keeps the
+ * module linking and loading on stock Asterisk. When present it lets us send
+ * the custom headers / Bearer token during the handshake.
+ */
+typedef struct ast_websocket *(*audiofork_ws_create_with_headers_fn)(
+	const char *uri, const char *protocol, struct ast_variable *headers,
+	struct ast_tls_config *tls_cfg, enum ast_websocket_result *result);
+
+static audiofork_ws_create_with_headers_fn audiofork_get_ws_create_with_headers(void)
+{
+	static int resolved = 0;
+	static audiofork_ws_create_with_headers_fn fn = NULL;
+
+	if (!resolved) {
+		fn = (audiofork_ws_create_with_headers_fn) dlsym(RTLD_DEFAULT, "ast_websocket_client_create_with_headers");
+		resolved = 1;
+	}
+	return fn;
+}
+
+/*
 	1 = success
 	0 = fail
 */
@@ -483,15 +670,80 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 	}
 
 	// Check if we're running with TLS
-	if (audiofork->has_tls == 1) {
-		ast_verb(2, "<%s> [AudioFork] (%s) Creating to WebSocket server with TLS mode enabled\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", audiofork->tls_cfg, &result);
-	} else {
-		ast_verb(2, "<%s> [AudioFork] (%s) Creating to WebSocket server without TLS\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, "echo", NULL, &result);
+	{
+		const char *subprotocol = S_OR(audiofork->subprotocol, AUDIOFORK_DEFAULT_SUBPROTOCOL);
+		struct ast_variable *extra_headers = NULL;
+		audiofork_ws_create_with_headers_fn create_with_headers = audiofork_get_ws_create_with_headers();
+
+		if (!ast_strlen_zero(audiofork->headers)) {
+			extra_headers = audiofork_parse_headers_to_list(audiofork->headers);
+			ast_verb(2, "<%s> [AudioFork] (%s) Custom handshake headers: %s\n",
+				ast_channel_name(audiofork->autochan->chan), audiofork->direction_string,
+				audiofork->headers);
+		}
+
+		/* Prefer the header-capable constructor when it exists and we actually
+		 * have headers to send (e.g. custom headers and/or a Bearer token). */
+		if (create_with_headers && extra_headers) {
+			ast_verb(2, "<%s> [AudioFork] (%s) Using ast_websocket_client_create_with_headers() (custom headers supported)\n",
+				ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+			if (audiofork->has_tls == 1) {
+				audiofork->websocket = create_with_headers(audiofork->audiofork_ds->wsserver,
+					subprotocol, extra_headers, audiofork->tls_cfg, &result);
+			} else {
+				audiofork->websocket = create_with_headers(audiofork->audiofork_ds->wsserver,
+					subprotocol, extra_headers, NULL, &result);
+			}
+		} else {
+			if (extra_headers) {
+				/* The stock ast_websocket_client_create() API only accepts a
+				 * subprotocol and not arbitrary headers, so they cannot be sent.
+				 * Warn clearly; the server must accept credentials via the
+				 * subprotocol or a URL query string instead. */
+				ast_log(LOG_WARNING, "<%s> [AudioFork] (%s) ast_websocket_client_create_with_headers() not available in this Asterisk build; custom headers / Bearer token will NOT be transmitted. Supply credentials via the subprotocol or URL query string.\n",
+					ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+			}
+			if (audiofork->has_tls == 1) {
+				ast_verb(2, "<%s> [AudioFork] (%s) Creating WebSocket server with TLS mode enabled (subprotocol: %s)\n",
+					ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, subprotocol);
+				audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, subprotocol, audiofork->tls_cfg, &result);
+			} else {
+				ast_verb(2, "<%s> [AudioFork] (%s) Creating WebSocket server without TLS (subprotocol: %s)\n",
+					ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, subprotocol);
+				audiofork->websocket = ast_websocket_client_create(audiofork->audiofork_ds->wsserver, subprotocol, NULL, &result);
+			}
+		}
+
+		if (extra_headers) {
+			ast_variables_destroy(extra_headers);
+		}
 	}
 
 	return result;
+
+/*
+ * Sleep (interruptibly) for up to \a seconds seconds, waking early (returning
+ * 1) if the audiofork has been told to stop running in the meantime. Uses a
+ * 100 ms granularity via nanosleep() so a StopAudioFork is honoured quickly
+ * instead of waiting up to a whole second.
+ */
+static int audiofork_sleep_interruptible(int seconds, struct audiofork *audiofork)
+{
+	struct timespec ts;
+	int elapsed = 0;
+
+	ts.tv_sec = 0;
+	ts.tv_nsec = 100000000L; /* 100 milliseconds */
+
+	while (elapsed < seconds) {
+		if (audiofork->audiohook.status != AST_AUDIOHOOK_STATUS_RUNNING) {
+			return 1;
+		}
+		nanosleep(&ts, NULL);
+		elapsed++;
+	}
+
+	return 0;
 }
 
 /*
@@ -501,45 +753,52 @@ static enum ast_websocket_result audiofork_ws_connect(struct audiofork *audiofor
 */
 static int audiofork_start_reconnecting(struct audiofork *audiofork)
 {
-	int counter= 0;
-	int status = 0;
-	int timeout = audiofork->reconnection_timeout;
 	int attempts = audiofork->reconnection_attempts;
-	int last_attempt = 0;
-	int now;
-	int delta;
-	int result;
+	int delay = audiofork->reconnection_timeout > 0 ? audiofork->reconnection_timeout : RECONNECT_MIN_DELAY;
+	int attempt;
+	enum ast_websocket_result result;
 
-	while (counter < attempts) {
-		now = (int)time(NULL);
-		delta = now - last_attempt;
-
-		// small check to see if we should keep waiting on the reconnection. This uses the
-		// reconnection_timeout variable configured in the dialplan
-		if (last_attempt != 0 && delta <= timeout) {
-			// keep waiting
-			continue;
-		}
-
-		// try to reconnect
-		result = audiofork_ws_connect(audiofork);
-		if (result == WS_OK) {
-			status = 0;
-			last_attempt = 0;
-			break;
-		}
-
-		// reconnection failed...
-		// update our counter with the last reconnection attempt
-		last_attempt=(int)time(NULL);
-
-		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection failed... trying again in %d seconds. %d attempts remaining reconn_now %d reconn_last_attempt %d\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, timeout, (attempts-counter), now, last_attempt);
-
-		counter ++;
-		status = 1;
+	if (attempts <= 0) {
+		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) No reconnection attempts configured; giving up.\n",
+			ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+		return 1;
 	}
 
-	return status;
+	for (attempt = 1; attempt <= attempts; attempt++) {
+		ast_log(LOG_WARNING, "<%s> [AudioFork] (%s) Reconnection attempt %d/%d in %d second(s)...\n",
+			ast_channel_name(audiofork->autochan->chan), audiofork->direction_string,
+			attempt, attempts, delay);
+
+		/* Wait before retrying, but bail out if the hook has been stopped */
+		if (audiofork_sleep_interruptible(delay, audiofork)) {
+			ast_log(LOG_NOTICE, "<%s> [AudioFork] (%s) Reconnection cancelled.\n",
+				ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+			return 1;
+		}
+
+		result = audiofork_ws_connect(audiofork);
+		if (result == WS_OK) {
+			ast_log(LOG_NOTICE, "<%s> [AudioFork] (%s) Successfully reconnected on attempt %d/%d (delay was %d s).\n",
+				ast_channel_name(audiofork->autochan->chan), audiofork->direction_string,
+				attempt, attempts, delay);
+			return 0;
+		}
+
+		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Reconnection attempt %d/%d failed (result %d).\n",
+			ast_channel_name(audiofork->autochan->chan), audiofork->direction_string,
+			attempt, attempts, result);
+
+		/* exponential backoff: double the delay, capped at the maximum */
+		delay <<= 1;
+		if (delay > RECONNECT_MAX_DELAY) {
+			delay = RECONNECT_MAX_DELAY;
+		}
+	}
+
+	ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Exhausted %d reconnection attempts; giving up.\n",
+		ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, attempts);
+
+	return 1;
 }
 
 static void audiofork_free(struct audiofork *audiofork)
@@ -549,11 +808,18 @@ static void audiofork_free(struct audiofork *audiofork)
 			ast_mutex_destroy(&audiofork->audiofork_ds->lock);
 			ast_cond_destroy(&audiofork->audiofork_ds->destruction_condition);
 			ast_free(audiofork->audiofork_ds);
+			audiofork->audiofork_ds = NULL;
 		}
 
 		ast_free(audiofork->name);
 		ast_free(audiofork->post_process);
 		ast_free(audiofork->wsserver);
+		ast_free(audiofork->codec);
+		ast_free(audiofork->subprotocol);
+		ast_free(audiofork->headers);
+		if (audiofork->format) {
+			ao2_cleanup(audiofork->format);
+		}
 
 		audiofork_ws_close(audiofork);
 
@@ -566,10 +832,147 @@ static void audiofork_free(struct audiofork *audiofork)
 
 
 
+
+
+/*!
+ * \brief Resolve the ast_format to request from the audiohook.
+ *
+ * For SLIN the caller supplied \a rate is honoured (8000/16000/32000/48000).
+ * For G722/PCMU/PCMA the rate is forced to 8000 Hz (their native clock rate).
+ * \a rate is updated in place to reflect the rate actually used.
+ * \return ao2 bumped ast_format (caller must ao2_cleanup) or NULL on failure.
+ */
+static struct ast_format *audiofork_get_format(const char *codec, int *rate)
+{
+	if (ast_strlen_zero(codec) || !strcasecmp(codec, "SLIN")) {
+		switch (*rate) {
+		case 8000:
+		case 16000:
+		case 32000:
+		case 48000:
+			break;
+		default:
+			ast_log(LOG_WARNING, "[AudioFork] Unsupported SLIN sample rate %d, defaulting to 8000\n", *rate);
+			*rate = 8000;
+			break;
+		}
+		return ast_format_cache_get_slin_by_rate(*rate);
+	} else if (!strcasecmp(codec, "G722")) {
+		*rate = 8000;
+		return ao2_bump(ast_format_g722);
+	} else if (!strcasecmp(codec, "PCMU")) {
+		*rate = 8000;
+		return ao2_bump(ast_format_ulaw);
+	} else if (!strcasecmp(codec, "PCMA")) {
+		*rate = 8000;
+		return ao2_bump(ast_format_alaw);
+	}
+
+	ast_log(LOG_WARNING, "[AudioFork] Unknown codec '%s', defaulting to SLIN/8000\n", codec);
+	*rate = 8000;
+	return ast_format_cache_get_slin_by_rate(8000);
+}
+
+/*! \brief Append a JSON-escaped string to the dynamic buffer. */
+static void json_append_string(struct ast_str **buf, const char *s)
+{
+	const char *p;
+
+	ast_str_append(buf, 0, "\"");
+	for (p = s; p && *p; p++) {
+		switch (*p) {
+		case '"':
+			ast_str_append(buf, 0, "\\\"");
+			break;
+		case '\\':
+			ast_str_append(buf, 0, "\\\\");
+			break;
+		case '\n':
+			ast_str_append(buf, 0, "\\n");
+			break;
+		case '\r':
+			ast_str_append(buf, 0, "\\r");
+			break;
+		case '\t':
+			ast_str_append(buf, 0, "\\t");
+			break;
+		case '\b':
+			ast_str_append(buf, 0, "\\b");
+			break;
+		case '\f':
+			ast_str_append(buf, 0, "\\f");
+			break;
+		default:
+			if ((unsigned char) *p < 0x20) {
+				ast_str_append(buf, 0, "\\u%04x", (unsigned char) *p);
+			} else {
+				ast_str_append(buf, 0, "%c", *p);
+			}
+			break;
+		}
+	}
+	ast_str_append(buf, 0, "\"");
+}
+
+/*!
+ * \brief Build the JSON metadata object describing the call.
+ * \return Newly allocated string (caller must ast_free) or NULL on failure.
+ */
+static char *audiofork_build_metadata(struct audiofork *audiofork)
+{
+	struct ast_channel *chan;
+	const struct ast_party_caller *caller;
+	const char *cid_num = "";
+	const char *cid_name = "";
+	const char *exten;
+	const char *chan_name;
+	time_t start;
+	struct ast_str *buf;
+	char *out;
+
+	if (!audiofork->autochan || !audiofork->autochan->chan) {
+		return NULL;
+	}
+
+	chan = audiofork->autochan->chan;
+	caller = ast_channel_caller(chan);
+	if (caller) {
+		cid_num = S_OR(caller->id.number.str, "");
+		cid_name = S_OR(caller->id.name.str, "");
+	}
+	exten = ast_channel_exten(chan);
+	chan_name = ast_channel_name(chan);
+	start = time(NULL);
+
+	if (!(buf = ast_str_create(256))) {
+		return NULL;
+	}
+
+	ast_str_append(&buf, 0, "{");
+	ast_str_append(&buf, 0, "\"channel\":");
+	json_append_string(buf, chan_name);
+	ast_str_append(&buf, 0, ",\"caller_id_number\":");
+	json_append_string(buf, cid_num);
+	ast_str_append(&buf, 0, ",\"caller_id_name\":");
+	json_append_string(buf, cid_name);
+	ast_str_append(&buf, 0, ",\"dialed_number\":");
+	json_append_string(buf, exten);
+	ast_str_append(&buf, 0, ",\"start_time\":%ld", (long) start);
+	ast_str_append(&buf, 0, ",\"sample_rate\":%d", audiofork->sample_rate);
+	ast_str_append(&buf, 0, ",\"codec\":");
+	json_append_string(buf, S_OR(audiofork->codec, AUDIOFORK_DEFAULT_CODEC));
+	ast_str_append(&buf, 0, "}");
+
+	out = ast_strdup(ast_str_buffer(buf));
+	ast_free(buf);
+
+	return out;
+}
+
 static void *audiofork_thread(void *obj)
 {
 	struct audiofork *audiofork = obj;
-	struct ast_format *format_slin;
+	struct ast_format *format;
 	char *channel_name_cleanup;
 	enum ast_websocket_result result;
 	int frames_sent = 0;
@@ -600,19 +1003,58 @@ static void *audiofork_thread(void *obj)
 
 	ast_verb(2, "<%s> [AudioFork] (%s) Begin AudioFork Recording %s\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, audiofork->name);
 
-	//fs = &audiofork->audiofork_ds->fs;
+	/* Determine the format the audiohook must deliver. ast_audiohook_read_frame()
+	 * transparently transcodes the channel audio into the requested format. */
+	format = audiofork->format;
+	if (!format) {
+		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) No audio format configured; aborting.\n",
+			ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+		destroy_monitor_audiohook(audiofork);
+		ast_autochan_destroy(audiofork->autochan);
+		ast_module_unref(ast_module_info->self);
+		return 0;
+	}
 
-	ast_mutex_lock(&audiofork->audiofork_ds->lock);
-	format_slin = ast_format_cache_get_slin_by_rate(audiofork->audiofork_ds->samp_rate);
+	/* Send JSON metadata over the websocket before the audio stream, if requested.
+	 * Retry a few times (with a short delay) to survive transient congestion; if
+	 * all attempts fail we log an error but continue with the audio stream,
+	 * because metadata is not critical for media delivery. */
+	if (audiofork->send_metadata) {
+		char *metadata = audiofork_build_metadata(audiofork);
+		if (metadata) {
+			int attempt;
+			int meta_ok = 0;
+			struct timespec meta_sleep = { 0, 200000000L }; /* 200 ms */
 
-	ast_mutex_unlock(&audiofork->audiofork_ds->lock);
+			for (attempt = 1; attempt <= 3 && !meta_ok; attempt++) {
+				ast_verb(2, "<%s> [AudioFork] (%s) Sending metadata (attempt %d/3): %s\n",
+					ast_channel_name(audiofork->autochan->chan), audiofork->direction_string,
+					attempt, metadata);
+				if (!ast_websocket_write(audiofork->websocket, AST_WEBSOCKET_OPCODE_TEXT, metadata, strlen(metadata))) {
+					meta_ok = 1;
+				} else {
+					ast_log(LOG_WARNING, "<%s> [AudioFork] (%s) Metadata send attempt %d/3 failed\n",
+						ast_channel_name(audiofork->autochan->chan), audiofork->direction_string, attempt);
+					if (attempt < 3) {
+						nanosleep(&meta_sleep, NULL);
+					}
+				}
+			}
+
+			if (!meta_ok) {
+				ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) All metadata send attempts failed; continuing with audio stream.\n",
+					ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
+			}
+			ast_free(metadata);
+		}
+	}
 
 	/* The audiohook must enter and exit the loop locked */
 	ast_audiohook_lock(&audiofork->audiohook);
 
 	while (audiofork->audiohook.status == AST_AUDIOHOOK_STATUS_RUNNING) {
 		// ast_verb(2, "<%s> [AudioFork] (%s) Reading Audio Hook frame...\n", ast_channel_name(audiofork->autochan->chan), audiofork->direction_string);
-		struct ast_frame *fr = ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME, audiofork->direction, format_slin);
+		struct ast_frame *fr = ast_audiohook_read_frame(&audiofork->audiohook, SAMPLES_PER_FRAME, audiofork->direction, format);
 
 		if (!fr) {
 			ast_audiohook_trigger_wait(&audiofork->audiohook);
@@ -683,12 +1125,27 @@ static void *audiofork_thread(void *obj)
 
 	ast_autochan_destroy(audiofork->autochan);
 
-	/* Datastore cleanup.  close the filestream and wait for ds destruction */
-	ast_mutex_lock(&audiofork->audiofork_ds->lock);
-	if (!audiofork->audiofork_ds->destruction_ok) {
-		ast_cond_wait(&audiofork->audiofork_ds->destruction_condition, &audiofork->audiofork_ds->lock);
+	/* Datastore cleanup: wait until the datastore has been removed by
+	 * stop_audiofork_full() or channel teardown. audiofork_ds_destroy() has
+	 * already released the ds's dynamically-allocated members and signalled
+	 * this condition. The ds container itself is owned by this thread, so we
+	 * release it here and clear the pointer; audiofork_free() keeps an
+	 * if (audiofork->audiofork_ds) guard and will therefore NOT free it a
+	 * second time (this prevents a double free / use-after-free). */
+	{
+		struct audiofork_ds *ds = audiofork->audiofork_ds;
+
+		ast_mutex_lock(&ds->lock);
+		if (!ds->destruction_ok) {
+			ast_cond_wait(&ds->destruction_condition, &ds->lock);
+		}
+		ast_mutex_unlock(&ds->lock);
+
+		audiofork->audiofork_ds = NULL;
+		ast_mutex_destroy(&ds->lock);
+		ast_cond_destroy(&ds->destruction_condition);
+		ast_free(ds);
 	}
-	ast_mutex_unlock(&audiofork->audiofork_ds->lock);
 
 	/* kill the audiohook */
 	destroy_monitor_audiohook(audiofork);
@@ -745,7 +1202,12 @@ static int setup_audiofork_ds(struct audiofork *audiofork, struct ast_channel *c
 		ast_autochan_channel_unlock(audiofork->autochan);
 	}
 
-	audiofork_ds->samp_rate = 8000;
+	audiofork_ds->samp_rate = audiofork->sample_rate;
+	audiofork_ds->codec = ast_strdup(S_OR(audiofork->codec, AUDIOFORK_DEFAULT_CODEC));
+	audiofork_ds->subprotocol = ast_strdup(S_OR(audiofork->subprotocol, AUDIOFORK_DEFAULT_SUBPROTOCOL));
+	audiofork_ds->headers = ast_strdup(audiofork->headers);
+	audiofork_ds->send_metadata = audiofork->send_metadata;
+	audiofork_ds->format = audiofork->format ? ao2_bump(audiofork->format) : NULL;
 	audiofork_ds->audiohook = &audiofork->audiohook;
 	audiofork_ds->wsserver = ast_strdup(audiofork->wsserver);
 	if (!ast_strlen_zero(beep_id)) {
@@ -771,7 +1233,12 @@ static int launch_audiofork_thread(
 	int readvol, int writevol,
 	const char *post_process,
 	const char *uid_channel_var,
-	const char *beep_id
+	const char *beep_id,
+	int sample_rate,
+	const char *codec,
+	const char *subprotocol,
+	const char *headers,
+	int send_metadata
 )
 {
 	pthread_t thread;
@@ -841,6 +1308,23 @@ static int launch_audiofork_thread(
 
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection attempts to %d\n", ast_channel_name(chan), audiofork->reconnection_attempts);
 	ast_verb(2, "<%s> [AudioFork] Setting reconnection timeout to %d\n", ast_channel_name(chan), audiofork->reconnection_timeout);
+
+	/* Audio format / websocket handshake options */
+	audiofork->sample_rate = sample_rate;
+	audiofork->codec = ast_strdup(S_OR(codec, AUDIOFORK_DEFAULT_CODEC));
+	audiofork->subprotocol = ast_strlen_zero(subprotocol) ? NULL : ast_strdup(subprotocol);
+	audiofork->headers = ast_strlen_zero(headers) ? NULL : ast_strdup(headers);
+	audiofork->send_metadata = send_metadata;
+
+	audiofork->format = audiofork_get_format(audiofork->codec, &audiofork->sample_rate);
+	if (!audiofork->format) {
+		ast_log(LOG_ERROR, "<%s> [AudioFork] (%s) Failed to resolve audio format '%s'\n",
+			ast_channel_name(chan), audiofork->direction_string, audiofork->codec);
+		audiofork_free(audiofork);
+		return -1;
+	}
+	ast_verb(2, "<%s> [AudioFork] (%s) Audio format: codec=%s rate=%d\n",
+		ast_channel_name(chan), audiofork->direction_string, audiofork->codec, audiofork->sample_rate);
 
 	/* Server */
 	if (!ast_strlen_zero(wsserver)) {
@@ -917,6 +1401,11 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 	char *tcert = NULL;
 	int reconn_timeout = 5;
 	int reconn_attempts = 5;
+	int sample_rate = 8000;
+	int send_metadata = 0;
+	char *codec = NULL;
+	char *subprotocol = NULL;
+	char *headers = NULL;
 	AST_DECLARE_APP_ARGS(args, 
 		AST_APP_ARG(wsserver);
 		AST_APP_ARG(options);
@@ -1015,6 +1504,66 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 			reconn_attempts = atoi( S_OR(opts[OPT_ARG_RECONNECTION_ATTEMPTS], "15") );
 			ast_verb(2, "Reconnection attempts set to: %d\n", reconn_attempts);
 		}
+
+		if (ast_test_flag(&flags, MUXFLAG_SAMPLE_RATE)) {
+			sample_rate = atoi( S_OR(opts[OPT_ARG_SAMPLE_RATE], "8000") );
+			if (sample_rate <= 0) {
+				ast_log(LOG_WARNING, "Invalid sample rate '%s', defaulting to 8000\n", opts[OPT_ARG_SAMPLE_RATE]);
+				sample_rate = 8000;
+			}
+			ast_verb(2, "Sample rate set to: %d\n", sample_rate);
+		}
+
+		if (ast_test_flag(&flags, MUXFLAG_CODEC)) {
+			codec = ast_strdup( S_OR(opts[OPT_ARG_CODEC], AUDIOFORK_DEFAULT_CODEC) );
+			ast_verb(2, "Codec set to: %s\n", codec);
+		}
+
+		if (ast_test_flag(&flags, MUXFLAG_SUBPROTOCOL)) {
+			subprotocol = ast_strdup( S_OR(opts[OPT_ARG_SUBPROTOCOL], "") );
+			ast_verb(2, "WebSocket subprotocol set to: %s\n", subprotocol);
+		}
+
+		if (ast_test_flag(&flags, MUXFLAG_HEADERS)) {
+			headers = ast_strdup( S_OR(opts[OPT_ARG_HEADERS], "") );
+			ast_verb(2, "Custom handshake headers set to: %s\n", headers);
+		}
+
+		if (ast_test_flag(&flags, MUXFLAG_AUTH)) {
+			const char *token = S_OR(opts[OPT_ARG_AUTH], "");
+			if (!ast_strlen_zero(token)) {
+				char *auth_header;
+				if (ast_asprintf(&auth_header, "Authorization: Bearer %s", token) == -1) {
+					ast_log(LOG_ERROR, "Failed to allocate memory for auth header.\n");
+				} else if (ast_strlen_zero(headers)) {
+					headers = auth_header;
+				} else {
+					char *combined;
+					if (ast_asprintf(&combined, "%s,%s", headers, auth_header) == -1) {
+						ast_log(LOG_ERROR, "Failed to combine auth header with custom headers.\n");
+					} else {
+						ast_free(headers);
+						headers = combined;
+					}
+					ast_free(auth_header);
+				}
+			}
+		}
+
+		if (ast_test_flag(&flags, MUXFLAG_METADATA)) {
+			send_metadata = 1;
+			ast_verb(2, "Metadata transmission enabled\n");
+		}
+
+		/* Validate and sanitise the combined custom-header string (custom -H
+		 * headers and/or the -A Bearer token) to reject malformed pairs and
+		 * strip control characters that could be used for header injection. */
+		if (!ast_strlen_zero(headers)) {
+			char clean[1024];
+			audiofork_normalize_headers(headers, clean, sizeof(clean));
+			ast_free(headers);
+			headers = ast_strlen_zero(clean) ? NULL : ast_strdup(clean);
+		}
 	}
 
 	/* If there are no file writing arguments/options for the mix monitor, send a warning message and return -1 */
@@ -1041,12 +1590,22 @@ static int audiofork_exec(struct ast_channel *chan, const char *data)
 		writevol,
 		args.post_process, 
 		uid_channel_var, 
-		beep_id)
+		beep_id,
+		sample_rate,
+		codec,
+		subprotocol,
+		headers,
+		send_metadata)
 	) {
 
 		/* Failed */
 		ast_module_unref(ast_module_info->self);
 	}
+
+	ast_free(tcert);
+	ast_free(codec);
+	ast_free(subprotocol);
+	ast_free(headers);
 
 	return 0;
 }

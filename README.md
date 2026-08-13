@@ -1,237 +1,197 @@
-## What is app_audiofork
+# AudioFork – Asterisk Audio Streaming over WebSocket
 
-app_audiofork helps you send audio from Asterisk to a websocket server easily.
+📖 **Read this document in Persian:** [README_fa.md](README_fa.md)
 
-For instance:
-```
-ASTERISK -> AUDIO STREAM -> WS APP SERVER
-```
+---
 
-The primary objective of this module is to offer a straightforward integration with the Asterisk audiohooks API, providing an interface for developers to better analyze audio and run other processing tasks on it.
+## 1. Project Title & Introduction
 
-# How to install it
+**English**
 
-You can use the Makefile to easily install app_audiofork. 
+**AudioFork** is an Asterisk module that forks raw audio streams from an Asterisk channel to a remote WebSocket server in real time. This enables a wide range of live processing use cases such as speech‑to‑text transcription, call recording, sentiment/voice analytics, acoustic detection, and any downstream application that consumes live audio.
 
-To get started, please run:
+The module is built on top of Asterisk's `ast_audiohook` API, which lets it intercept a channel's audio without disturbing the call. The **original** `app_audiofork` (by Nadir Hamid) introduced the basic ability to stream SLIN 8 kHz audio to a WebSocket. This **updated version** adds configurable audio formats (codec and sample rate), robust reconnection with exponential backoff, custom HTTP headers and Bearer‑token authentication, WebSocket subprotocol negotiation, JSON metadata transmission, header sanitisation, and precise interruption handling — based on real‑world production needs.
 
-```
-make
-make install
-```
+---
 
-## Load module
+## 2. Credits & License
 
-Afterwards, you can load the module with the following command:
+**English**
 
-```
-asterisk -rx 'module load app_audiofork.so'
-```
+_Original author:_ **Nadir Hamid** – original `app_audiofork` project. (Repository reference: the original source is widely known in the Asterisk community; see the upstream `app_audiofork` by Nadir Hamid.)
 
-# Configuring in dial plans
+_Maintainer & contributor:_ **Hossein Mohhmadian (Hosseinhunta)** – [https://github.com/hosseinhunta](https://github.com/hosseinhunta). This version has been maintained, improved, and had critical bugs fixed based on real‑world production needs. The code is now more robust and secure.
 
-Here is a simple example of how to use "AudioFork()"
+_License:_ GNU General Public License v2.0. See the `LICENSE` file in this repository. This is a derivative work; both the original and this enhanced version are distributed under GPLv2.
 
-```
-exten => _X.,1,Answer()
-exten => _X.,n,Verbose(starting audio fork)
-exten => _X.,n,AudioFork(ws://localhost:8080/)
-exten => _X.,n,Verbose(audio fork was started continuing call..)
-exten => _X.,n,Playback(hello-world)
-exten => _X.,n,Hangup()
-```
+---
 
-# Configuring a Websocket server
+## 3. Key Features
 
-In order to integrate the module, it is advised that you use a websocket server that is compliant with the latest standard. In other words, it should reliably send both text and binary data frames.
+**English**
 
-Here is a recommended Node.js Websocket module:
-[WebSocket nodejs server](https://github.com/websockets/ws)
+| Feature                           | Option   | Description                                                                                                                                                                               |
+| :-------------------------------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multiple audio formats            | `c`, `L` | SLIN at 8/16/32/48 kHz, plus codecs G722, PCMU, PCMA. Asterisk transcodes automatically.                                                                                                  |
+| Custom HTTP headers & Bearer auth | `H`, `A` | Sent during the WebSocket handshake. Uses `ast_websocket_client_create_with_headers` when available; otherwise a clear warning is logged and headers fall back to subprotocol/URL params. |
+| WebSocket subprotocol             | `s`      | E.g. `audio/raw`. Negotiated during the handshake (defaults to `echo`).                                                                                                                   |
+| JSON metadata                     | `M`      | A TEXT frame (channel, caller ID, dialed number, start time, sample rate, codec) is sent before the audio stream.                                                                         |
+| Exponential backoff               | –        | Delay doubles each attempt, capped at 30 s, up to `r` attempts.                                                                                                                           |
+| Fast interruption                 | –        | `StopAudioFork` is honoured within ~100 ms (nanosleep‑based).                                                                                                                             |
+| Header sanitisation               | –        | Control characters stripped; malformed pairs skipped to prevent injection.                                                                                                                |
+| Metadata retry                    | –        | Up to 3 attempts with 200 ms delay; failure is logged but audio continues.                                                                                                                |
 
-# Example: simple integration
+---
 
-Below is an example that receives audio frames from the AudioFork app and stores them in a audio file.
+## 4. Installation & Build
 
-```
-const WebSocket = require('ws');
+**English**
 
-const wss = new WebSocket.Server({ port: 8080 });
-var fs = require('fs');
-var wstream = fs.createWriteStream('audio.raw');
+_Prerequisites_
 
-wss.on('connection', function connection(ws) {
-  console.log("got connection ");
+- Asterisk **13+** (tested on 18.x / 20.x).
+- Runtime modules loaded in Asterisk: `func_periodic_hook` (optional, for periodic beep), `codec_g722`, `codec_ulaw`, `codec_alaw`, and `res_websocket`.
+- Development headers from your Asterisk source tree.
 
-  ws.on('message', function incoming(message) {
-    console.log('received frame..');
-    wstream.write(message);
-  });
-});
+_Build & install_
+
+```bash
+# Point ASTTOPDIR at your Asterisk source tree
+make ASTTOPDIR=/usr/src/asterisk
+sudo make install ASTTOPDIR=/usr/src/asterisk
 ```
 
+_Load the module_
 
-# Converting raw audio to WAV
+```bash
+# From the Asterisk CLI:
+module load app_audiofork.so
 
-You can quickly convert any raw audio data to a another format, such as WAV, using the Sox command line tool.
-
-For example:
-
-```
-sox -r 8000 -e signed-integer -b 16 audio.raw audio.wav
-```
-
-# Sending separate Websocket streams
-
-In a production scenario, it is common to handle both the incoming and outgoing legs of a call.  The basic example doesn't do that, but it is certainly possible.
-
-Below is an example including a WebSocket server that handles two connections and stores each stream in its a unique file.
-
-Updated dialplan
-
-```
-[main-out]
-exten => _.,1,Verbose(call was placed..)
-same => n,Answer()
-same => n,AudioFork(ws://localhost:8080/out,D(out))
-same => n,Dial(SIP/1001,60,gM(in))
-same => n,Hangup()
-
-[macro-in]
-exten => _.,1,Verbose(macro-in called)
-same => n,AudioFork(ws://localhost:8080/in,D(out))
+# To auto-load at startup, add to /etc/asterisk/modules.conf:
+[modules]
+load => app_audiofork.so
 ```
 
-Node.js server implementation
+---
 
-```
-const http = require('http');
-const WebSocket = require('ws');
-const url = require('url');
-const fs = require('fs');
+## 5. Usage Guide
 
-const server = http.createServer();
-const wss1 = new WebSocket.Server({ noServer: true });
-const wss2 = new WebSocket.Server({ noServer: true });
-var outstream = fs.createWriteStream('out.raw');
-var instream = fs.createWriteStream('in.raw');
+**English**
 
+_Dialplan example_
 
-wss1.on('connection', function connection(ws) {
-  // ...
-  console.log("got out connection ");
-
-  ws.on('message', function incoming(message) {
-    console.log('received out frame..');
-    outstream.write(message);
-  });
-});
-
-wss2.on('connection', function connection(ws) {
-  // ...
-  console.log("got in connection ");
-
-  ws.on('message', function incoming(message) {
-    console.log('received in frame..');
-    instream.write(message);
-  });
-
-});
-
-server.on('upgrade', function upgrade(request, socket, head) {
-  const pathname = url.parse(request.url).pathname;
-
-  if (pathname === '/out') {
-    wss1.handleUpgrade(request, socket, head, function done(ws) {
-      wss1.emit('connection', ws, request);
-    });
-  } else if (pathname === '/in') {
-    wss2.handleUpgrade(request, socket, head, function done(ws) {
-      wss2.emit('connection', ws, request);
-    });
-  } else {
-    socket.destroy();
-  }
-});
-
-server.listen(8080);
+```text
+exten => 100,1,Answer()
+exten => 100,n,AudioFork(ws://127.0.0.1:8080/in,c(SLIN)L(8000)s(audio/raw)M,A(my-jwt)H(X-Api-Key:abc123))
 ```
 
-# Live transcription demos
+_Option reference_
 
-You can refer to the following demos for more complete integrations.
+| Option       | Meaning                                                                        |
+| :----------- | :----------------------------------------------------------------------------- |
+| `c(codec)`   | Codec: `SLIN`, `G722`, `PCMU`, `PCMA`.                                         |
+| `L(rate)`    | SLIN sample rate: `8000`, `16000`, `32000`, `48000`. Ignored for other codecs. |
+| `s(proto)`   | WebSocket subprotocol (e.g. `audio/raw`).                                      |
+| `M`          | Enable JSON metadata frame before audio.                                       |
+| `A(token)`   | Bearer token; adds `Authorization: Bearer <token>` header.                     |
+| `H(k:v,k:v)` | Custom headers as comma‑separated `Key:Value` pairs.                           |
+| `R(sec)`     | Initial reconnection delay in seconds (also the backoff base).                 |
+| `r(n)`       | Maximum number of reconnection attempts.                                       |
+| `T(cert)`    | TLS certificate path for secure (`wss://`) connections.                        |
+| `D(dir)`     | Direction: `in`, `out`, or `both` (default).                                   |
 
-- [Google cloud speech Transcribe Demo](https://github.com/nadirhamid/audiofork-google-cloud-speech-demo)
-- [Azure demo integration](https://github.com/nadirhamid/audiofork-azure-transcribe-demo)
-- [Amazon transcribe demo](https://github.com/nadirhamid/audiofork-amazon-transcribe-demo)
+_AMI actions_
 
-# TLS support
+```text
+Action: AudioFork
+Channel: PJSIP/1001-00000001
+WsServer: ws://127.0.0.1:8080/in
+Options: c(SLIN)L(8000)s(audio/raw)M
+ActionID: af1
 
-AudioFork currently supports secure websocket connections. In order to create a secure websocket connection, you must add the "T" option to the app options.
+Action: StopAudioFork
+Channel: PJSIP/1001-00000001
+ActionID: af2
 
-For example:
-
-```
-AudioFork(wss://example.org/in,D(out)T(on))
-```
-
-# Reconnecting closed sockets
-
-It is also possible to setup basic backoff for reconnection. By default, Audiofork is configured to reconnect to the WS server, and after a preconfigured number of attempts it will close the connection. These parameters, however, can be adjusted.
-
-To adjust the reconnection parameters, you can use the following parameters:
-
-```
-R(timeout_for_connection)
-r(number of times to attempt reconnection)
-```
-
-For instance, the following example will set the reconnection timeout to 10 seconds and will attempt to reconnect five times.
-
-```
-AudioFork(wss://example.org/in,R(10)r(5))
-```
-
-# Start an audio stream on demand
-
-It is possible to start an audio stream for a live call. We can do this by using AMI (asterisk manager interface). 
-
-In essence, we can start start streaming audio for any active channel.
-
-For a full example you can refer to the following NodeJS reference code. It uses the [NodeJS-AsteriskManager](https://github.com/pipobscure/NodeJS-AsteriskManager) library
-
-## Example: connect to AMI and call Audiofork
-
-```
-var ami = new require('asterisk-manager')('port','host','username','password', true);
-ami.keepConnected();
-ami.action({
-  'action':' 'AudioFork',
-  'channel':'PJSIP/myphone',
-  'ActionID': '1234',
-  'WsServer': 'ws://your_ws_server_url',
-  'Options': 'D(both)',
-  'Command': 'StartAudioFork'
-}, function(err, res) {
-  if (err) {
-    console.error( err )
-    return;
-  }
-  console.log(res)
-});
+Action: AudioForkMute
+Channel: PJSIP/1001-00000001
+Direction: both
+State: 1
 ```
 
-# Project roadmap
+_CLI commands_
 
-At this time, AudioFork is largely incomplete and has many updates planned. 
-
-The following updates are scheduled for the upcoming releases:
-
-- Test and ensure module is fully compatible with Asterisk manager
-- Store any WebSocket responses in a dialplan variable
-
-# Contact info
-
-For any queries, please contact me directly:
+```bash
+asterisk -rx "audiofork start PJSIP/1001-00000001 ws://127.0.0.1:8080/in,c(SLIN)L(8000)M"
+asterisk -rx "audiofork stop PJSIP/1001-00000001"
+asterisk -rx "audiofork list PJSIP/1001-00000001"
 ```
-Nadir Hamid <matrix.nad@gmail.com>
+
+---
+
+## 6. Architecture Overview
+
+**English**
+
 ```
+Asterisk channel
+      │  ast_audiohook (spy) intercepts audio
+      ▼
+audiofork_thread
+      │  ast_audiohook_read_frame(format)  → transcoded to requested codec/rate
+      │
+      ├─(once, if M)─▶ JSON metadata as TEXT frame
+      │
+      └─(loop)──────▶ audio frames as BINARY frames ──▶ WebSocket server
+```
+
+- `struct audiofork` – per‑session state owned by the fork thread: the audiohook, the resolved `ast_format`, codec/rate/subprotocol/headers, metadata flag, and flags.
+- `struct audiofork_ds` – a datastore attached to the channel holding the WebSocket URL, format, and synchronisation locks. **Lifetime is single‑owner**: the fork thread frees it after `ast_cond_wait()` and NULLs `audiofork->audiofork_ds`; `audiofork_free()` only frees it when non‑NULL. Preserving this invariant avoids a double‑free / use‑after‑free.
+
+---
+
+## 7. Fixes & Improvements Over the Original
+
+**English**
+
+1. **Fixed critical double‑free of `audiofork_ds`.** Ownership moved to the fork thread, which frees the structure after the destruction condition is met and NULLs the pointer so `audiofork_free()` cannot free it twice.
+2. **Actually transmit custom headers and Bearer token.** The module resolves `ast_websocket_client_create_with_headers` at runtime via `dlsym()`. When present, `-H`/`-A` headers are sent during the handshake; otherwise a clear `LOG_WARNING` explains headers are not transmitted (use subprotocol or URL `?token=...`).
+3. **Added input validation for headers.** `audiofork_normalize_headers()` strips control characters and skips malformed pairs (missing `:`), preventing header‑injection attacks.
+4. **Improved `audiofork_sleep_interruptible` precision.** Replaced the `sleep(1)` loop with `nanosleep()` at 100 ms granularity, so `StopAudioFork` is honoured within ~100 ms.
+5. **Added retry logic for metadata transmission.** The JSON metadata send retries up to 3 times with a 200 ms delay; on failure it logs an error but continues the audio stream.
+
+---
+
+## 8. Troubleshooting
+
+**English**
+
+| Issue                  | Solution                                                                                                                                                                                                                   |
+| :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Headers not sent**   | On stock Asterisk, `ast_websocket_client_create_with_headers` is unavailable. Pass credentials via the subprotocol or a URL query string, e.g. `ws://host/stream?token=...`. A `LOG_WARNING` is printed when this happens. |
+| **Reconnection fails** | Check your `R` (initial delay) and `r` (attempts) values and verify network reachability/firewall to the WebSocket server.                                                                                                 |
+| **Memory leaks**       | Always stop a fork cleanly: call `StopAudioFork` (dialplan/AMI/CLI) or let the channel hang up; this triggers the datastore cleanup.                                                                                       |
+| **Module not loading** | Ensure prerequisite modules are loaded: `res_websocket`, `codec_g722`, `codec_ulaw`, `codec_alaw` (and `func_periodic_hook` if using the beep). Confirm it was built against the correct Asterisk version.                 |
+
+---
+
+## 9. Contributing
+
+**English**
+
+Contributions, bug reports, and feature requests are welcome. Please open an issue or pull request on the maintained fork: [https://github.com/hosseinhunta](https://github.com/hosseinhunta). When reporting problems, include the Asterisk version, the exact `AudioFork(...)` options used, and any `[AudioFork]` log lines.
+
+---
+
+## 10. Changelog
+
+**English**
+
+| Version              | Author                            | Notes                                                                                                                                                                                                                                                                                                                                                                   |
+| :------------------- | :-------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Original             | Nadir Hamid                       | Basic WebSocket audio forking (SLIN 8 kHz).                                                                                                                                                                                                                                                                                                                             |
+| Enhanced (this fork) | Hossein Mohhmadian (Hosseinhunta) | Configurable codec/rate (`c`,`L`); subprotocol (`s`); custom headers & Bearer auth (`H`,`A`) via runtime `dlsym` of `ast_websocket_client_create_with_headers`; JSON metadata (`M`) with 3‑retry send; exponential‑backoff reconnection (`R`,`r`); `nanosleep`‑based 100 ms interruption; header input sanitisation; critical double‑free fix of `audiofork_ds`. GPLv2. |
+
+---
+
+_License: GNU General Public License v2.0 — see the `LICENSE` file._
