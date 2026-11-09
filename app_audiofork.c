@@ -557,6 +557,16 @@ static void audiofork_free(struct audiofork *audiofork)
 
 		audiofork_ws_close(audiofork);
 
+		/*
+		 * ast_websocket_close() only sends the CLOSE frame. The underlying
+		 * socket is closed in the websocket's destructor, so the reference
+		 * returned by ast_websocket_client_create() must be released here.
+		 * Otherwise the TCP connection is left in CLOSE-WAIT forever once the
+		 * server closes its side.
+		 */
+		ao2_cleanup(audiofork->websocket);
+		audiofork->websocket = NULL;
+
 		/* clean stringfields */
 		ast_string_field_free_memory(audiofork);
 
